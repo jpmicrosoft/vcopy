@@ -37,6 +37,13 @@ func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 	}
 	sp.Stop()
 
+	// Remove hidden refs (refs/pull/*) that GitHub rejects on push.
+	// These are read-only refs created by GitHub for PR head/merge commits
+	// and cannot be pushed to another repo.
+	if err := removeHiddenRefs(mirrorPath, verbose); err != nil && verbose {
+		fmt.Printf("  Warning: failed to clean hidden refs: %v\n", err)
+	}
+
 	// LFS: fetch all LFS objects from source
 	if lfs {
 		sp = progress.Start("Fetching LFS objects...")
@@ -115,6 +122,43 @@ func hasLFSObjects(repoPath string) bool {
 		return false
 	}
 	return strings.Contains(string(out), "filter=lfs")
+}
+
+// removeHiddenRefs deletes refs/pull/* and other hidden GitHub refs from a bare clone
+// so that mirror push does not fail with "deny updating a hidden ref".
+func removeHiddenRefs(repoPath string, verbose bool) error {
+	cmd := exec.Command("git", "-C", repoPath, "for-each-ref", "--format=%(refname)", "refs/pull/")
+	out, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+	refs := strings.TrimSpace(string(out))
+	if refs == "" {
+		return nil
+	}
+
+	// Build update-ref --stdin input to delete all PR refs
+	var input strings.Builder
+	count := 0
+	for _, ref := range strings.Split(refs, "\n") {
+		ref = strings.TrimSpace(ref)
+		if ref != "" {
+			input.WriteString(fmt.Sprintf("delete %s\n", ref))
+			count++
+		}
+	}
+
+	if count > 0 {
+		delCmd := exec.Command("git", "-C", repoPath, "update-ref", "--stdin")
+		delCmd.Stdin = strings.NewReader(input.String())
+		if delErr := delCmd.Run(); delErr != nil {
+			return fmt.Errorf("update-ref failed: %w", delErr)
+		}
+		if verbose {
+			fmt.Printf("  Removed %d hidden refs (refs/pull/*) from bare clone\n", count)
+		}
+	}
+	return nil
 }
 
 // runGitCmd executes a git command, sanitizing any token from output to prevent leakage.
