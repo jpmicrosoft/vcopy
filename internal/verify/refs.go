@@ -125,8 +125,8 @@ func listRemoteRefs(host, owner, repo, token string) (map[string]string, error) 
 		if len(parts) >= 2 {
 			sha := parts[0]
 			ref := parts[1]
-			// Skip HEAD, it's just a symbolic ref
-			if ref == "HEAD" {
+			// Skip HEAD (symbolic ref) and hidden GitHub refs (refs/pull/*)
+			if ref == "HEAD" || strings.HasPrefix(ref, "refs/pull/") {
 				continue
 			}
 			refs[ref] = sha
