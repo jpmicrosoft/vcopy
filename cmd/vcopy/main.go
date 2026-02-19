@@ -173,8 +173,12 @@ fmt.Printf("Creating target repository %s/%s on %s...\n", targetOrg, repoName, t
 
 // Check if target repo already exists — mirror push is destructive
 exists, existErr := tgtClient.RepoExists(targetOrg, repoName)
-if existErr != nil && verbose {
+if existErr != nil {
+if !force {
+return fmt.Errorf("cannot verify if target repo exists: %w\n  Use --force to bypass this check", existErr)
+}
 fmt.Printf("  Warning: could not check if target repo exists: %v\n", existErr)
+fmt.Println("  Proceeding because --force was specified.")
 }
 if exists {
 if !force {

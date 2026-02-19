@@ -48,7 +48,15 @@ func formatMigratedPRBody(pr *gh.PullRequest, srcOwner, srcRepo string) string {
 	}
 	sb.WriteString(fmt.Sprintf("> *Original author: %s*\n", author))
 	sb.WriteString(fmt.Sprintf("> *State: %s*\n", pr.GetState()))
-	sb.WriteString(fmt.Sprintf("> *Base: %s ← Head: %s*\n", pr.GetBase().GetRef(), pr.GetHead().GetRef()))
+	baseRef := "unknown"
+	if pr.GetBase() != nil {
+		baseRef = pr.GetBase().GetRef()
+	}
+	headRef := "unknown"
+	if pr.GetHead() != nil {
+		headRef = pr.GetHead().GetRef()
+	}
+	sb.WriteString(fmt.Sprintf("> *Base: %s ← Head: %s*\n", baseRef, headRef))
 	sb.WriteString(fmt.Sprintf("> *Created: %s*\n\n", pr.GetCreatedAt().Format("2006-01-02 15:04:05 UTC")))
 	if pr.GetMerged() {
 		mergedBy := "unknown"
