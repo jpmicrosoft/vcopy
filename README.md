@@ -232,6 +232,7 @@ A git bundle is created from both source and target repos. SHA-256 checksums are
 - **Input validation on `--since`**: The `--since` value is validated to prevent git flag injection; only hex SHAs and date strings are accepted.
 - **SSRF protection**: Release asset downloads validate URL scheme (https only) and use a timeout-limited HTTP client.
 - **Attestation uses proper GPG detached signatures**: Signing produces an armored detached signature; verification uses separate temp files for signature and data, matching GPG's expected `--verify <sig-file> <data-file>` protocol.
+- **Nil-safe metadata migration**: Issue, PR, and comment formatting guards against nil user pointers (deleted/ghost GitHub accounts) to prevent panics during metadata copy.
 
 ## Git LFS Support
 

@@ -28,9 +28,15 @@ func TestCloneURL_Enterprise(t *testing.T) {
 	}
 }
 
-func TestNewUploadFile_NilOnBadReader(t *testing.T) {
+func TestNewUploadFile_ErrorOnBadReader(t *testing.T) {
 	// Test with a reader that fails immediately
-	f := NewUploadFile(&failReader{}, "test.bin", 100)
+	f, err := NewUploadFile(&failReader{}, "test.bin", 100)
+	if err == nil {
+		if f != nil {
+			f.Cleanup()
+		}
+		t.Error("expected error for failing reader")
+	}
 	if f != nil {
 		f.Cleanup()
 		t.Error("expected nil UploadFile for failing reader")

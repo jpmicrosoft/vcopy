@@ -56,11 +56,11 @@ func CopyReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRep
 				continue
 			}
 
-			uploadFile := ghclient.NewUploadFile(resp.Body, asset.GetName(), int64(asset.GetSize()))
+			uploadFile, uploadErr := ghclient.NewUploadFile(resp.Body, asset.GetName(), int64(asset.GetSize()))
 			resp.Body.Close() // safe: NewUploadFile fully copies body to temp file before returning
-			if uploadFile == nil {
+			if uploadErr != nil {
 				if verbose {
-					fmt.Printf("    Warning: failed to prepare asset %s for upload\n", asset.GetName())
+					fmt.Printf("    Warning: failed to prepare asset %s for upload: %v\n", asset.GetName(), uploadErr)
 				}
 				continue
 			}
