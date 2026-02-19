@@ -95,7 +95,11 @@ func listBranches(repoPath string) ([]string, error) {
 
 // getTreeHash gets the root tree hash for a given branch.
 func getTreeHash(repoPath, branch string) (string, error) {
-	cmd := exec.Command("git", "-C", repoPath, "rev-parse", branch+"^{tree}")
+	// Pass ref^{tree} as a single argument to avoid injection via branch names.
+	// exec.Command does not invoke a shell, and git treats each arg separately,
+	// but concatenating user input is fragile — use explicit ref syntax.
+	ref := branch + "^{tree}"
+	cmd := exec.Command("git", "-C", repoPath, "rev-parse", ref)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err

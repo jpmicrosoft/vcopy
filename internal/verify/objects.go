@@ -185,9 +185,37 @@ func VerifyObjectsSince(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, sr
 	return result, nil
 }
 
+// validateSince ensures the --since value is a valid SHA or date, not a flag injection.
+func validateSince(since string) error {
+	if strings.HasPrefix(since, "-") {
+		return fmt.Errorf("invalid --since value %q: must not start with '-'", since)
+	}
+	// Allow hex SHA (short or full)
+	isHex := true
+	for _, c := range since {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			isHex = false
+			break
+		}
+	}
+	if isHex && len(since) >= 4 {
+		return nil
+	}
+	// Allow date-like patterns (digits, dashes, colons, T, Z, +, spaces)
+	for _, c := range since {
+		if !((c >= '0' && c <= '9') || c == '-' || c == ':' || c == 'T' || c == 'Z' || c == '+' || c == ' ' || c == '.') {
+			return fmt.Errorf("invalid --since value %q: must be a git SHA or date", since)
+		}
+	}
+	return nil
+}
+
 // listObjectsSince lists objects reachable from commits after the given reference.
 func listObjectsSince(repoPath, since string) ([]string, error) {
-	// Try as SHA first (since..HEAD), fall back to --since=date
+	if err := validateSince(since); err != nil {
+		return nil, err
+	}
+	// Try as date first (--after=date), fall back to SHA range (since..HEAD)
 	cmd := exec.Command("git", "-C", repoPath, "rev-list", "--objects", "--all", "--after="+since)
 	out, err := cmd.Output()
 	if err != nil {
