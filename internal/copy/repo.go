@@ -1,10 +1,12 @@
 package copy
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	ghclient "github.com/jaiperez/vcopy/internal/github"
 )
@@ -26,13 +28,7 @@ func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 	if verbose {
 		fmt.Printf("  Bare cloning from %s/%s/%s...\n", srcHost, srcOwner, srcName)
 	}
-	cloneCmd := exec.Command("git", "clone", "--bare", "--mirror", srcURL, mirrorPath)
-	cloneCmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	if verbose {
-		cloneCmd.Stdout = os.Stdout
-		cloneCmd.Stderr = os.Stderr
-	}
-	if err := cloneCmd.Run(); err != nil {
+	if err := runGitCmd(verbose, srcToken, tgtToken, nil, "clone", "--bare", "--mirror", srcURL, mirrorPath); err != nil {
 		return fmt.Errorf("bare clone failed: %w", err)
 	}
 
@@ -40,13 +36,7 @@ func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 	if verbose {
 		fmt.Printf("  Mirror pushing to %s/%s/%s...\n", tgtHost, tgtOrg, tgtName)
 	}
-	pushCmd := exec.Command("git", "-C", mirrorPath, "push", "--mirror", tgtURL)
-	pushCmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	if verbose {
-		pushCmd.Stdout = os.Stdout
-		pushCmd.Stderr = os.Stderr
-	}
-	if err := pushCmd.Run(); err != nil {
+	if err := runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--mirror", tgtURL); err != nil {
 		return fmt.Errorf("mirror push failed: %w", err)
 	}
 
@@ -66,17 +56,58 @@ func CopyWiki(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tg
 
 	wikiPath := filepath.Join(tmpDir, "wiki.git")
 
-	cloneCmd := exec.Command("git", "clone", "--bare", "--mirror", srcURL, wikiPath)
-	cloneCmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	if err := cloneCmd.Run(); err != nil {
+	if err := runGitCmd(false, srcToken, tgtToken, nil, "clone", "--bare", "--mirror", srcURL, wikiPath); err != nil {
 		return fmt.Errorf("wiki clone failed (wiki may not exist): %w", err)
 	}
 
-	pushCmd := exec.Command("git", "-C", wikiPath, "push", "--mirror", tgtURL)
-	pushCmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	if err := pushCmd.Run(); err != nil {
+	if err := runGitCmd(false, srcToken, tgtToken, &wikiPath, "push", "--mirror", tgtURL); err != nil {
 		return fmt.Errorf("wiki push failed: %w", err)
 	}
 
 	return nil
+}
+
+// runGitCmd executes a git command, sanitizing any token from output to prevent leakage.
+func runGitCmd(verbose bool, srcToken, tgtToken string, dir *string, args ...string) error {
+	gitArgs := args
+	if dir != nil {
+		gitArgs = append([]string{"-C", *dir}, args...)
+	}
+
+	cmd := exec.Command("git", gitArgs...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	err := cmd.Run()
+
+	if verbose {
+		sanitized := sanitizeOutput(stdoutBuf.String(), srcToken, tgtToken)
+		if sanitized != "" {
+			fmt.Print(sanitized)
+		}
+		sanitized = sanitizeOutput(stderrBuf.String(), srcToken, tgtToken)
+		if sanitized != "" {
+			fmt.Print(sanitized)
+		}
+	}
+
+	if err != nil {
+		sanitizedErr := sanitizeOutput(stderrBuf.String(), srcToken, tgtToken)
+		return fmt.Errorf("%w: %s", err, sanitizedErr)
+	}
+	return nil
+}
+
+// sanitizeOutput replaces tokens in output with [REDACTED] to prevent credential leakage.
+func sanitizeOutput(output, srcToken, tgtToken string) string {
+	if srcToken != "" {
+		output = strings.ReplaceAll(output, srcToken, "[REDACTED]")
+	}
+	if tgtToken != "" {
+		output = strings.ReplaceAll(output, tgtToken, "[REDACTED]")
+	}
+	return output
 }

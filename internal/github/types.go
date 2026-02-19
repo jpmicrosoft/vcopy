@@ -21,7 +21,11 @@ func NewUploadFile(r io.Reader, name string, size int64) *UploadFile {
 		os.Remove(tmpFile.Name())
 		return nil
 	}
-	tmpFile.Seek(0, 0)
+	if _, err := tmpFile.Seek(0, 0); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		return nil
+	}
 	return &UploadFile{File: tmpFile}
 }
 

@@ -78,7 +78,7 @@ func CopyIssues(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRepo 
 		if issue.GetState() == "closed" {
 			closedState := "closed"
 			closeReq := &gh.IssueRequest{State: &closedState}
-			if _, err := tgt.CreateIssue(tgtOwner, tgtRepo, closeReq); err != nil {
+			if err := tgt.EditIssue(tgtOwner, tgtRepo, newIssue.GetNumber(), closeReq); err != nil {
 				if verbose {
 					fmt.Printf("  Warning: failed to close issue #%d: %v\n", newIssue.GetNumber(), err)
 				}
