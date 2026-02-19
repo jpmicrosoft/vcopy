@@ -120,6 +120,49 @@ vcopy myorg/myrepo target-org --report audit.json
 vcopy myorg/myrepo target-org --dry-run
 ```
 
+## Public Repositories
+
+Use the `--public` flag when the source repository is publicly accessible. This skips source authentication entirely — you only need credentials for the target.
+
+### How `--public` works
+
+| Feature | With `--public` | Without `--public` |
+|---------|----------------|-------------------|
+| Git clone/push | ✅ No source token needed | Requires source token |
+| Verification (refs, objects, trees, bundle) | ✅ No source token needed | Requires source token |
+| Commit signature verification | ✅ No source token needed | Requires source token |
+| Metadata copy (issues, PRs, releases) | ⚠️ Works but rate-limited (60 req/hr) | Full rate limit (5,000 req/hr) |
+| Wiki copy | ✅ No source token needed | Requires source token |
+
+### Examples
+
+Copy a public repo (no source auth needed):
+```bash
+vcopy golang/go my-org --public
+```
+
+Copy a public repo with metadata (rate-limited for large repos):
+```bash
+vcopy golang/go my-org --public --all-metadata
+```
+
+Copy a public repo to an Enterprise instance:
+```bash
+vcopy kubernetes/kubernetes my-org --public --target-host github.mycompany.com
+```
+
+### Rate limiting with public repos
+
+When copying metadata from public repos without a source token, the GitHub API allows only **60 requests per hour** (unauthenticated). This is usually fine for:
+- Repos with fewer than ~50 issues/PRs/releases
+
+For larger repos, provide a source token even with `--public` to get 5,000 req/hr:
+```bash
+vcopy large-org/big-repo my-org --public --issues --source-token ghp_xxx
+```
+
+The `--public` flag controls whether source auth is *required* — you can always optionally provide a `--source-token` alongside it for better rate limits on metadata operations.
+
 ## Verification Details
 
 ### Git Object Hash Verification
@@ -147,6 +190,7 @@ A git bundle is created from both source and target repos. SHA-256 checksums are
 | `--auth-method` | `auto` | Auth method: `auto`, `gh`, `pat` |
 | `--source-token` | | PAT for source |
 | `--target-token` | | PAT for target |
+| `--public` | `false` | Source repo is public (skip source auth) |
 | `--issues` | `false` | Copy issues |
 | `--pull-requests` | `false` | Copy pull requests |
 | `--wiki` | `false` | Copy wiki |

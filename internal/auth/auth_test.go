@@ -36,3 +36,30 @@ func TestAuthenticate_AutoWithTokens(t *testing.T) {
 		t.Errorf("got (%q, %q), want (%q, %q)", src, tgt, "s", "t")
 	}
 }
+
+func TestAuthenticateTarget_PatWithToken(t *testing.T) {
+	tgt, err := AuthenticateTarget("pat", "ghes.example.com", "my-target-token")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tgt != "my-target-token" {
+		t.Errorf("target token = %q, want %q", tgt, "my-target-token")
+	}
+}
+
+func TestAuthenticateTarget_AutoWithToken(t *testing.T) {
+	tgt, err := AuthenticateTarget("auto", "github.com", "tgt-tok")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tgt != "tgt-tok" {
+		t.Errorf("target token = %q, want %q", tgt, "tgt-tok")
+	}
+}
+
+func TestAuthenticateTarget_UnknownMethod(t *testing.T) {
+	_, err := AuthenticateTarget("invalid", "github.com", "")
+	if err == nil {
+		t.Fatal("expected error for unknown auth method")
+	}
+}

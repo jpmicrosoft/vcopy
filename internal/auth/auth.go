@@ -25,6 +25,30 @@ func Authenticate(method, sourceHost, targetHost, sourceToken, targetToken strin
 	}
 }
 
+// AuthenticateTarget resolves only the target token (for public source repos).
+func AuthenticateTarget(method, targetHost, targetToken string) (string, error) {
+	switch method {
+	case "auto":
+		if targetToken != "" {
+			return targetToken, nil
+		}
+		token, err := tryGHToken(targetHost)
+		if err != nil {
+			return promptForToken(targetHost, "target")
+		}
+		return token, nil
+	case "gh":
+		return tryGHToken(targetHost)
+	case "pat":
+		if targetToken != "" {
+			return targetToken, nil
+		}
+		return promptForToken(targetHost, "target")
+	default:
+		return "", fmt.Errorf("unknown auth method: %s", method)
+	}
+}
+
 func autoAuth(sourceHost, targetHost, srcToken, tgtToken string) (string, string, error) {
 	var err error
 

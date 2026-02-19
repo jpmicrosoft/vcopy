@@ -19,6 +19,7 @@ var (
 	authMethod   string
 	sourceToken  string
 	targetToken  string
+	publicSource bool
 	copyIssues   bool
 	copyPRs      bool
 	copyWiki     bool
@@ -51,6 +52,7 @@ signatures, and bundle SHA-256 checksums.`,
 	f.StringVar(&authMethod, "auth-method", "auto", "Auth method: auto, gh, pat")
 	f.StringVar(&sourceToken, "source-token", "", "PAT for source (if auth-method=pat)")
 	f.StringVar(&targetToken, "target-token", "", "PAT for target (if auth-method=pat)")
+	f.BoolVar(&publicSource, "public", false, "Source repo is public (skip source authentication)")
 	f.BoolVar(&copyIssues, "issues", false, "Copy issues")
 	f.BoolVar(&copyPRs, "pull-requests", false, "Copy pull requests")
 	f.BoolVar(&copyWiki, "wiki", false, "Copy wiki")
@@ -89,7 +91,7 @@ func run(cmd *cobra.Command, args []string) error {
 
 	if dryRun {
 		fmt.Println("=== DRY RUN ===")
-		fmt.Printf("Source:  %s/%s\n", sourceHost, sourceRepo)
+		fmt.Printf("Source:  %s/%s (public: %v)\n", sourceHost, sourceRepo, publicSource)
 		fmt.Printf("Target:  %s/%s/%s\n", targetHost, targetOrg, repoName)
 		fmt.Printf("Copy Issues: %v, PRs: %v, Wiki: %v, Releases: %v\n", copyIssues, copyPRs, copyWiki, copyReleases)
 		fmt.Printf("Verify Only: %v\n", verifyOnly)
@@ -97,9 +99,24 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	// Authenticate
-	srcToken, tgtToken, err := auth.Authenticate(authMethod, sourceHost, targetHost, sourceToken, targetToken)
-	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
+	var srcToken, tgtToken string
+	var err error
+	if publicSource {
+		// Public source: skip source auth, only authenticate target
+		fmt.Println("Public source mode: skipping source authentication")
+		if copyIssues || copyPRs || copyReleases {
+			fmt.Println("Note: Metadata copy from public repos uses unauthenticated API access (60 req/hr rate limit).")
+			fmt.Println("      For repos with many issues/PRs/releases, consider providing a source token for higher limits.")
+		}
+		tgtToken, err = auth.AuthenticateTarget(authMethod, targetHost, targetToken)
+		if err != nil {
+			return fmt.Errorf("target authentication failed: %w", err)
+		}
+	} else {
+		srcToken, tgtToken, err = auth.Authenticate(authMethod, sourceHost, targetHost, sourceToken, targetToken)
+		if err != nil {
+			return fmt.Errorf("authentication failed: %w", err)
+		}
 	}
 
 	// Create GitHub API clients
