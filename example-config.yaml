@@ -22,6 +22,7 @@ verify:
   skip: false
 
 lfs: true
+force: false  # Set to true to allow pushing to existing target repos (still prompts for confirmation)
 verbose: false
 
 report:

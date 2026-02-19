@@ -16,6 +16,7 @@ type Config struct {
 	Verify   VerifyConfig   `yaml:"verify"`
 	Report   ReportConfig   `yaml:"report"`
 	LFS      bool           `yaml:"lfs"`
+	Force    bool           `yaml:"force"`
 	Verbose  bool           `yaml:"verbose"`
 }
 

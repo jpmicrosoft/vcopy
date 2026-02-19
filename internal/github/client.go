@@ -46,6 +46,18 @@ func NewClient(host, token string) *Client {
 	}
 }
 
+// RepoExists checks whether a repository exists and is accessible.
+func (c *Client) RepoExists(owner, repo string) (bool, error) {
+	_, resp, err := c.API.Repositories.Get(c.ctx, owner, repo)
+	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // CreateRepo creates a repository in the specified organization or user account.
 // It first tries the org endpoint; if the target is a personal account (404), it
 // falls back to creating under the authenticated user.

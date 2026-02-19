@@ -1,8 +1,10 @@
 package main
 
 import (
+"bufio"
 "fmt"
 "os"
+"strings"
 
 "github.com/jpmicrosoft/vcopy/internal/auth"
 "github.com/jpmicrosoft/vcopy/internal/config"
@@ -22,6 +24,7 @@ sourceToken  string
 targetToken  string
 publicSource bool
 lfs          bool
+force        bool
 copyIssues   bool
 copyPRs      bool
 copyWiki     bool
@@ -62,6 +65,7 @@ f.StringVar(&sourceToken, "source-token", "", "PAT for source (if auth-method=pa
 f.StringVar(&targetToken, "target-token", "", "PAT for target (if auth-method=pat)")
 f.BoolVar(&publicSource, "public", false, "Source repo is public (skip source authentication)")
 f.BoolVar(&lfs, "lfs", false, "Include Git LFS objects in copy")
+f.BoolVar(&force, "force", false, "Force push to existing target repo (WARNING: overwrites all branches/tags)")
 f.BoolVar(&copyIssues, "issues", false, "Copy issues")
 f.BoolVar(&copyPRs, "pull-requests", false, "Copy pull requests")
 f.BoolVar(&copyWiki, "wiki", false, "Copy wiki")
@@ -166,8 +170,35 @@ return err
 
 if !verifyOnly {
 fmt.Printf("Creating target repository %s/%s on %s...\n", targetOrg, repoName, targetHost)
+
+// Check if target repo already exists — mirror push is destructive
+exists, existErr := tgtClient.RepoExists(targetOrg, repoName)
+if existErr != nil && verbose {
+fmt.Printf("  Warning: could not check if target repo exists: %v\n", existErr)
+}
+if exists {
+if !force {
+return fmt.Errorf("target repository %s/%s already exists on %s\n"+
+"  WARNING: --force is required to push to an existing repo.\n"+
+"  A mirror push OVERWRITES all branches, tags, and history in the target.\n"+
+"  Any work in the target that does not exist in the source WILL BE LOST.\n"+
+"  Re-run with --force if you understand the risks", targetOrg, repoName, targetHost)
+}
+// --force provided, but still require explicit confirmation
+fmt.Println()
+fmt.Printf("  ⚠️  WARNING: Target repository %s/%s already exists on %s.\n", targetOrg, repoName, targetHost)
+fmt.Println("  A mirror push will OVERWRITE all branches, tags, and history in the target.")
+fmt.Println("  Any content in the target that does not exist in the source WILL BE PERMANENTLY LOST.")
+fmt.Println()
+if !confirmAction("Do you want to continue and overwrite the existing repository?") {
+fmt.Println("Aborted.")
+return nil
+}
+fmt.Println()
+} else {
 if err := tgtClient.CreateRepo(targetOrg, repoName, verbose); err != nil {
 return fmt.Errorf("failed to create target repo: %w", err)
+}
 }
 
 fmt.Printf("Mirroring %s/%s from %s to %s/%s on %s...\n", srcOwner, srcName, sourceHost, targetOrg, repoName, targetHost)
@@ -268,6 +299,7 @@ targetToken = cfg.Auth.TargetToken
 }
 if !publicSource { publicSource = cfg.Source.Public }
 if !lfs { lfs = cfg.LFS }
+if !force { force = cfg.Force }
 if !copyIssues { copyIssues = cfg.Copy.Issues }
 if !copyPRs { copyPRs = cfg.Copy.PullRequests }
 if !copyWiki { copyWiki = cfg.Copy.Wiki }
@@ -307,4 +339,16 @@ if current != "" {
 parts = append(parts, current)
 }
 return parts
+}
+
+// confirmAction prompts the user with a yes/no question and returns true only if they type "yes" or "y".
+func confirmAction(prompt string) bool {
+reader := bufio.NewReader(os.Stdin)
+fmt.Printf("  %s [yes/no]: ", prompt)
+answer, err := reader.ReadString('\n')
+if err != nil {
+return false
+}
+answer = strings.TrimSpace(strings.ToLower(answer))
+return answer == "yes" || answer == "y"
 }
