@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	ghclient "github.com/jpmicrosoft/vcopy/internal/github"
 )
@@ -72,6 +73,9 @@ func createBundleChecksum(host, owner, repo, token, prefix string, verbose bool)
 		return "", fmt.Errorf("clone failed: %w", err)
 	}
 
+	// Remove hidden refs (refs/pull/*) so bundles match between source and target
+	removeHiddenRefsFromClone(repoPath)
+
 	// Create bundle
 	bundleCmd := exec.Command("git", "-C", repoPath, "bundle", "create", bundlePath, "--all")
 	if err := bundleCmd.Run(); err != nil {
@@ -101,4 +105,28 @@ func fileSHA256(path string) (string, error) {
 	}
 
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+// removeHiddenRefsFromClone removes refs/pull/* from a bare clone so that
+// verification bundles and comparisons are not affected by GitHub's hidden refs.
+func removeHiddenRefsFromClone(repoPath string) {
+	cmd := exec.Command("git", "-C", repoPath, "for-each-ref", "--format=%(refname)", "refs/pull/")
+	out, err := cmd.Output()
+	if err != nil {
+		return
+	}
+	refs := strings.TrimSpace(string(out))
+	if refs == "" {
+		return
+	}
+	var input strings.Builder
+	for _, ref := range strings.Split(refs, "\n") {
+		ref = strings.TrimSpace(ref)
+		if ref != "" {
+			input.WriteString(fmt.Sprintf("delete %s\n", ref))
+		}
+	}
+	delCmd := exec.Command("git", "-C", repoPath, "update-ref", "--stdin")
+	delCmd.Stdin = strings.NewReader(input.String())
+	delCmd.Run()
 }
