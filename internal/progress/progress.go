@@ -8,17 +8,16 @@ import (
 
 // Spinner displays a simple animated spinner with a message.
 type Spinner struct {
-	msg    string
-	failed bool
-	done   chan struct{}
-	wg     sync.WaitGroup
+	msg  string
+	done chan bool // true = failed, false = success
+	wg   sync.WaitGroup
 }
 
 // Start begins a spinner with the given message.
 func Start(msg string) *Spinner {
 	s := &Spinner{
 		msg:  msg,
-		done: make(chan struct{}),
+		done: make(chan bool, 1),
 	}
 	s.wg.Add(1)
 	go s.run()
@@ -34,8 +33,8 @@ func (s *Spinner) run() {
 
 	for {
 		select {
-		case <-s.done:
-			if s.failed {
+		case failed := <-s.done:
+			if failed {
 				fmt.Printf("\r  ✗ %s (failed)\n", s.msg)
 			} else {
 				fmt.Printf("\r  ✓ %s\n", s.msg)
@@ -50,14 +49,13 @@ func (s *Spinner) run() {
 
 // Stop stops the spinner and marks it as complete.
 func (s *Spinner) Stop() {
-	close(s.done)
+	s.done <- false
 	s.wg.Wait()
 }
 
 // StopFail stops the spinner and marks it as failed.
 func (s *Spinner) StopFail() {
-	s.failed = true
-	close(s.done)
+	s.done <- true
 	s.wg.Wait()
 }
 
