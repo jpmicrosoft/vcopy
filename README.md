@@ -202,6 +202,7 @@ A git bundle is created from both source and target repos. SHA-256 checksums are
 | `--target-token` | | PAT for target |
 | `--public` | `false` | Source repo is public (skip source auth) |
 | `--lfs` | `false` | Include Git LFS objects in copy |
+| `--force` | `false` | Allow push to existing target repo (requires confirmation) |
 | `--issues` | `false` | Copy issues |
 | `--pull-requests` | `false` | Copy pull requests |
 | `--wiki` | `false` | Copy wiki |
@@ -233,6 +234,30 @@ A git bundle is created from both source and target repos. SHA-256 checksums are
 - **SSRF protection**: Release asset downloads validate URL scheme (https only) and use a timeout-limited HTTP client.
 - **Attestation uses proper GPG detached signatures**: Signing produces an armored detached signature; verification uses separate temp files for signature and data, matching GPG's expected `--verify <sig-file> <data-file>` protocol.
 - **Nil-safe metadata migration**: Issue, PR, and comment formatting guards against nil user pointers (deleted/ghost GitHub accounts) to prevent panics during metadata copy.
+
+## Existing Repository Safety (`--force`)
+
+By default, vcopy **refuses** to push to a target repository that already exists. This prevents accidental data loss, since `git push --mirror` overwrites all branches, tags, and history in the target.
+
+To push to an existing repo, you must:
+1. Pass the `--force` flag
+2. Confirm with `yes` at the interactive prompt
+
+```bash
+# This will be rejected if target-org/myrepo already exists:
+vcopy myorg/myrepo target-org
+
+# Use --force to allow overwriting (you will be prompted to confirm):
+vcopy myorg/myrepo target-org --force
+```
+
+**What `--force` does:**
+- Detects the target repo already exists
+- Displays a warning explaining the risks
+- Asks for explicit `yes/no` confirmation before proceeding
+- Only proceeds if the user types `yes` or `y`
+
+> ⚠️ **WARNING**: A mirror push to an existing repository will **permanently delete** any branches, tags, or commits in the target that do not exist in the source. This cannot be undone.
 
 ## Git LFS Support
 
