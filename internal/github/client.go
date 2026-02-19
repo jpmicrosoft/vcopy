@@ -179,15 +179,30 @@ func (c *Client) CreateRelease(owner, repo string, release *gh.RepositoryRelease
 }
 
 // DownloadReleaseAsset downloads a release asset and returns the HTTP response body.
+// Caller is responsible for closing the response body.
 func (c *Client) DownloadReleaseAsset(owner, repo string, assetID int64) (*http.Response, error) {
 	_, redirectURL, err := c.API.Repositories.DownloadReleaseAsset(c.ctx, owner, repo, assetID, http.DefaultClient)
 	if err != nil {
 		return nil, err
 	}
 	if redirectURL != "" {
-		return http.Get(redirectURL)
+		resp, err := http.Get(redirectURL)
+		if err != nil {
+			return nil, fmt.Errorf("download request failed for asset %d: %w", assetID, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, fmt.Errorf("download failed for asset %d: HTTP %d", assetID, resp.StatusCode)
+		}
+		return resp, nil
 	}
 	return nil, fmt.Errorf("no download URL returned for asset %d", assetID)
+}
+
+// EditIssue updates an existing issue (e.g. to close it).
+func (c *Client) EditIssue(owner, repo string, number int, req *gh.IssueRequest) error {
+	_, _, err := c.API.Issues.Edit(c.ctx, owner, repo, number, req)
+	return err
 }
 
 // UploadReleaseAsset uploads an asset to a release.

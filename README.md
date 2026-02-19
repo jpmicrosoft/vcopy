@@ -162,3 +162,11 @@ A git bundle is created from both source and target repos. SHA-256 checksums are
 - **git** must be installed and available in PATH
 - **gh** CLI (optional, for `auto` or `gh` auth methods)
 - Network access to both source and target GitHub instances
+
+## Security
+
+- **Token input is hidden**: When entering PATs interactively, terminal echo is disabled so tokens are never visible on screen.
+- **Git output is sanitized**: All git command output (stdout/stderr) is filtered to replace tokens with `[REDACTED]` before display, preventing credential leakage in verbose mode or error messages.
+- **Tokens are never logged**: Tokens embedded in git clone URLs are stripped from any output shown to the user.
+- **Temp files are cleaned up**: All temporary directories (bare clones, bundles, asset uploads) are removed after use via `defer`.
+- **Private by default**: Target repositories are created as private.

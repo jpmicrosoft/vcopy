@@ -1,11 +1,12 @@
 package auth
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 // Authenticate resolves tokens for source and target GitHub hosts.
@@ -98,15 +99,15 @@ func tryGHToken(host string) (string, error) {
 	return token, nil
 }
 
-// promptForToken prompts the user to enter a PAT interactively.
+// promptForToken prompts the user to enter a PAT with echo disabled for security.
 func promptForToken(host, label string) (string, error) {
 	fmt.Printf("Enter PAT for %s (%s): ", label, host)
-	reader := bufio.NewReader(os.Stdin)
-	token, err := reader.ReadString('\n')
+	tokenBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Println() // newline after hidden input
 	if err != nil {
 		return "", fmt.Errorf("failed to read token: %w", err)
 	}
-	token = strings.TrimSpace(token)
+	token := strings.TrimSpace(string(tokenBytes))
 	if token == "" {
 		return "", fmt.Errorf("token cannot be empty for %s (%s)", label, host)
 	}
