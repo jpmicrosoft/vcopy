@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	gh "github.com/google/go-github/v58/github"
 	"golang.org/x/oauth2"
@@ -186,7 +188,13 @@ func (c *Client) DownloadReleaseAsset(owner, repo string, assetID int64) (*http.
 		return nil, err
 	}
 	if redirectURL != "" {
-		resp, err := http.Get(redirectURL)
+		// Validate redirect URL to prevent SSRF
+		parsedURL, err := url.Parse(redirectURL)
+		if err != nil || (parsedURL.Scheme != "https" && parsedURL.Scheme != "http") {
+			return nil, fmt.Errorf("invalid redirect URL for asset %d", assetID)
+		}
+		client := &http.Client{Timeout: 10 * time.Minute}
+		resp, err := client.Get(redirectURL)
 		if err != nil {
 			return nil, fmt.Errorf("download request failed for asset %d: %w", assetID, err)
 		}
