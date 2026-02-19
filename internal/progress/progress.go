@@ -9,6 +9,7 @@ import (
 // Spinner displays a simple animated spinner with a message.
 type Spinner struct {
 	msg    string
+	failed bool
 	done   chan struct{}
 	wg     sync.WaitGroup
 }
@@ -34,7 +35,11 @@ func (s *Spinner) run() {
 	for {
 		select {
 		case <-s.done:
-			fmt.Printf("\r  ✓ %s\n", s.msg)
+			if s.failed {
+				fmt.Printf("\r  ✗ %s (failed)\n", s.msg)
+			} else {
+				fmt.Printf("\r  ✓ %s\n", s.msg)
+			}
 			return
 		case <-ticker.C:
 			fmt.Printf("\r  %s %s", frames[i%len(frames)], s.msg)
@@ -51,11 +56,9 @@ func (s *Spinner) Stop() {
 
 // StopFail stops the spinner and marks it as failed.
 func (s *Spinner) StopFail() {
-	// Close first to stop the goroutine, then update msg safely before Wait returns
-	// the final print in run() with ✓ is acceptable — we override with ✗ below.
+	s.failed = true
 	close(s.done)
 	s.wg.Wait()
-	fmt.Printf("\r  ✗ %s (failed)\n", s.msg)
 }
 
 // Step prints a progress step message.

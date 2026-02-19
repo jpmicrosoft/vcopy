@@ -93,7 +93,11 @@ func CopyIssues(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRepo 
 func formatMigratedIssueBody(issue *gh.Issue, srcOwner, srcRepo string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("> *Migrated from %s/%s#%d*\n", srcOwner, srcRepo, issue.GetNumber()))
-	sb.WriteString(fmt.Sprintf("> *Original author: @%s*\n", issue.GetUser().GetLogin()))
+	author := "[deleted user]"
+	if issue.GetUser() != nil {
+		author = "@" + issue.GetUser().GetLogin()
+	}
+	sb.WriteString(fmt.Sprintf("> *Original author: %s*\n", author))
 	sb.WriteString(fmt.Sprintf("> *Created: %s*\n\n", issue.GetCreatedAt().Format("2006-01-02 15:04:05 UTC")))
 	sb.WriteString(issue.GetBody())
 	return sb.String()
@@ -101,8 +105,12 @@ func formatMigratedIssueBody(issue *gh.Issue, srcOwner, srcRepo string) string {
 
 func formatMigratedComment(comment *gh.IssueComment) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("> *Comment by @%s on %s*\n\n",
-		comment.GetUser().GetLogin(),
+	author := "[deleted user]"
+	if comment.GetUser() != nil {
+		author = "@" + comment.GetUser().GetLogin()
+	}
+	sb.WriteString(fmt.Sprintf("> *Comment by %s on %s*\n\n",
+		author,
 		comment.GetCreatedAt().Format("2006-01-02 15:04:05 UTC")))
 	sb.WriteString(comment.GetBody())
 	return sb.String()

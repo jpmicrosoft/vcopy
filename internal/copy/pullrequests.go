@@ -42,7 +42,11 @@ func CopyPullRequests(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tg
 func formatMigratedPRBody(pr *gh.PullRequest, srcOwner, srcRepo string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("> *Migrated PR from %s/%s#%d*\n", srcOwner, srcRepo, pr.GetNumber()))
-	sb.WriteString(fmt.Sprintf("> *Original author: @%s*\n", pr.GetUser().GetLogin()))
+	author := "[deleted user]"
+	if pr.GetUser() != nil {
+		author = "@" + pr.GetUser().GetLogin()
+	}
+	sb.WriteString(fmt.Sprintf("> *Original author: %s*\n", author))
 	sb.WriteString(fmt.Sprintf("> *State: %s*\n", pr.GetState()))
 	sb.WriteString(fmt.Sprintf("> *Base: %s ← Head: %s*\n", pr.GetBase().GetRef(), pr.GetHead().GetRef()))
 	sb.WriteString(fmt.Sprintf("> *Created: %s*\n\n", pr.GetCreatedAt().Format("2006-01-02 15:04:05 UTC")))
@@ -51,7 +55,11 @@ func formatMigratedPRBody(pr *gh.PullRequest, srcOwner, srcRepo string) string {
 		if pr.GetMergedBy() != nil {
 			mergedBy = pr.GetMergedBy().GetLogin()
 		}
-		sb.WriteString(fmt.Sprintf("> *Merged at: %s by @%s*\n\n", pr.GetMergedAt().Format("2006-01-02 15:04:05 UTC"), mergedBy))
+		mergedAt := "unknown"
+		if !pr.GetMergedAt().IsZero() {
+			mergedAt = pr.GetMergedAt().Format("2006-01-02 15:04:05 UTC")
+		}
+		sb.WriteString(fmt.Sprintf("> *Merged at: %s by @%s*\n\n", mergedAt, mergedBy))
 	}
 	sb.WriteString(pr.GetBody())
 	return sb.String()
