@@ -3,6 +3,8 @@ package verify
 import (
 	"fmt"
 	"time"
+
+	"github.com/jpmicrosoft/vcopy/internal/progress"
 )
 
 // Status constants for verification checks.
@@ -28,6 +30,13 @@ type VerificationReport struct {
 	TargetHost string        `json:"target_host"`
 	Timestamp  time.Time     `json:"timestamp"`
 	Checks     []CheckResult `json:"checks"`
+	Attestation *Attestation `json:"attestation,omitempty"`
+}
+
+// Attestation holds the GPG signature of the report.
+type Attestation struct {
+	SignedBy  string `json:"signed_by"`
+	Signature string `json:"signature"`
 }
 
 // AllPassed returns true if all checks passed (PASS or WARN).
@@ -40,8 +49,15 @@ func (r *VerificationReport) AllPassed() bool {
 	return true
 }
 
+// Options controls which verification checks to run.
+type Options struct {
+	QuickMode bool
+	Since     string // SHA or date for incremental verification
+	Verbose   bool
+}
+
 // RunAll executes all verification checks and returns a consolidated report.
-func RunAll(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, verbose bool) (*VerificationReport, error) {
+func RunAll(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, opts Options) (*VerificationReport, error) {
 	report := &VerificationReport{
 		SourceRepo: fmt.Sprintf("%s/%s", srcOwner, srcName),
 		TargetRepo: fmt.Sprintf("%s/%s", tgtOrg, tgtName),
@@ -51,31 +67,108 @@ func RunAll(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtT
 	}
 
 	type checkFunc func(string, string, string, string, string, string, string, string, bool) (*CheckResult, error)
-	checks := []struct {
-		name string
-		fn   checkFunc
-	}{
-		{"Ref Comparison", VerifyRefs},
-		{"Object Hashes", VerifyObjects},
-		{"Tree Hashes", VerifyTrees},
-		{"Commit Signatures", VerifySignatures},
-		{"Bundle Checksum", VerifyBundle},
+
+	// Quick mode: only refs + trees
+	// Full mode: refs, objects, trees, signatures, bundle
+	type checkDef struct {
+		name      string
+		fn        checkFunc
+		quickSkip bool
+	}
+
+	checks := []checkDef{
+		{"Ref Comparison", VerifyRefs, false},
+		{"Object Hashes", VerifyObjects, true},
+		{"Tree Hashes", VerifyTrees, false},
+		{"Commit Signatures", VerifySignatures, true},
+		{"Bundle Checksum", VerifyBundle, true},
 	}
 
 	for _, check := range checks {
-		if verbose {
-			fmt.Printf("\nRunning: %s...\n", check.name)
+		if opts.QuickMode && check.quickSkip {
+			report.Checks = append(report.Checks, CheckResult{
+				Name:    check.name,
+				Status:  StatusSkip,
+				Details: "Skipped (quick mode)",
+			})
+			continue
 		}
-		result, err := check.fn(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, verbose)
+
+		sp := progress.Start(fmt.Sprintf("Verifying: %s", check.name))
+		result, err := check.fn(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, opts.Verbose)
 		if err != nil {
+			sp.StopFail()
 			report.Checks = append(report.Checks, CheckResult{
 				Name:    check.name,
 				Status:  StatusFail,
 				Details: fmt.Sprintf("Check error: %v", err),
 			})
 		} else {
+			if result.Status == StatusFail {
+				sp.StopFail()
+			} else {
+				sp.Stop()
+			}
 			report.Checks = append(report.Checks, *result)
 		}
+	}
+
+	return report, nil
+}
+
+// RunIncremental runs verification only on objects newer than the given reference.
+func RunIncremental(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, since string, verbose bool) (*VerificationReport, error) {
+	report := &VerificationReport{
+		SourceRepo: fmt.Sprintf("%s/%s", srcOwner, srcName),
+		TargetRepo: fmt.Sprintf("%s/%s", tgtOrg, tgtName),
+		SourceHost: srcHost,
+		TargetHost: tgtHost,
+		Timestamp:  time.Now().UTC(),
+	}
+
+	// Always do ref comparison (fast)
+	sp := progress.Start("Verifying: Ref Comparison")
+	refsResult, err := VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, verbose)
+	if err != nil {
+		sp.StopFail()
+		report.Checks = append(report.Checks, CheckResult{Name: "Ref Comparison", Status: StatusFail, Details: err.Error()})
+	} else {
+		if refsResult.Status == StatusFail {
+			sp.StopFail()
+		} else {
+			sp.Stop()
+		}
+		report.Checks = append(report.Checks, *refsResult)
+	}
+
+	// Incremental object verification
+	sp = progress.Start(fmt.Sprintf("Verifying: Objects since %s", since))
+	objResult, err := VerifyObjectsSince(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, since, verbose)
+	if err != nil {
+		sp.StopFail()
+		report.Checks = append(report.Checks, CheckResult{Name: "Incremental Objects", Status: StatusFail, Details: err.Error()})
+	} else {
+		if objResult.Status == StatusFail {
+			sp.StopFail()
+		} else {
+			sp.Stop()
+		}
+		report.Checks = append(report.Checks, *objResult)
+	}
+
+	// Tree comparison (always)
+	sp = progress.Start("Verifying: Tree Hashes")
+	treeResult, err := VerifyTrees(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, verbose)
+	if err != nil {
+		sp.StopFail()
+		report.Checks = append(report.Checks, CheckResult{Name: "Tree Hashes", Status: StatusFail, Details: err.Error()})
+	} else {
+		if treeResult.Status == StatusFail {
+			sp.StopFail()
+		} else {
+			sp.Stop()
+		}
+		report.Checks = append(report.Checks, *treeResult)
 	}
 
 	return report, nil

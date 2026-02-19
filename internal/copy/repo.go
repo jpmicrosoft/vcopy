@@ -9,10 +9,12 @@ import (
 	"strings"
 
 	ghclient "github.com/jpmicrosoft/vcopy/internal/github"
+	"github.com/jpmicrosoft/vcopy/internal/progress"
+	"github.com/jpmicrosoft/vcopy/internal/retry"
 )
 
 // MirrorRepo performs a bare clone from source and mirror push to target.
-func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, verbose bool) error {
+func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, lfs, verbose bool) error {
 	srcURL := ghclient.CloneURL(srcHost, srcOwner, srcName, srcToken)
 	tgtURL := ghclient.CloneURL(tgtHost, tgtOrg, tgtName, tgtToken)
 
@@ -25,19 +27,57 @@ func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 	mirrorPath := filepath.Join(tmpDir, srcName+".git")
 
 	// Bare clone from source
-	if verbose {
-		fmt.Printf("  Bare cloning from %s/%s/%s...\n", srcHost, srcOwner, srcName)
+	sp := progress.Start(fmt.Sprintf("Cloning %s/%s/%s...", srcHost, srcOwner, srcName))
+	cloneErr := retry.Do(retry.Default(), "git clone", func() error {
+		return runGitCmd(verbose, srcToken, tgtToken, nil, "clone", "--bare", "--mirror", srcURL, mirrorPath)
+	})
+	if cloneErr != nil {
+		sp.StopFail()
+		return fmt.Errorf("bare clone failed: %w", cloneErr)
 	}
-	if err := runGitCmd(verbose, srcToken, tgtToken, nil, "clone", "--bare", "--mirror", srcURL, mirrorPath); err != nil {
-		return fmt.Errorf("bare clone failed: %w", err)
+	sp.Stop()
+
+	// LFS: fetch all LFS objects from source
+	if lfs {
+		sp = progress.Start("Fetching LFS objects...")
+		lfsErr := retry.Do(retry.Default(), "git lfs fetch", func() error {
+			return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "lfs", "fetch", "--all", srcURL)
+		})
+		if lfsErr != nil {
+			sp.StopFail()
+			return fmt.Errorf("LFS fetch failed: %w", lfsErr)
+		}
+		sp.Stop()
+	} else {
+		// Detect LFS usage and warn
+		if hasLFSObjects(mirrorPath) {
+			fmt.Println("  ⚠ Repository uses Git LFS but --lfs was not specified.")
+			fmt.Println("    LFS objects will NOT be copied. Use --lfs to include them.")
+		}
 	}
 
 	// Mirror push to target
-	if verbose {
-		fmt.Printf("  Mirror pushing to %s/%s/%s...\n", tgtHost, tgtOrg, tgtName)
+	sp = progress.Start(fmt.Sprintf("Pushing to %s/%s/%s...", tgtHost, tgtOrg, tgtName))
+	pushErr := retry.Do(retry.Default(), "git push", func() error {
+		return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--mirror", tgtURL)
+	})
+	if pushErr != nil {
+		sp.StopFail()
+		return fmt.Errorf("mirror push failed: %w", pushErr)
 	}
-	if err := runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--mirror", tgtURL); err != nil {
-		return fmt.Errorf("mirror push failed: %w", err)
+	sp.Stop()
+
+	// LFS: push all LFS objects to target
+	if lfs {
+		sp = progress.Start("Pushing LFS objects...")
+		lfsPushErr := retry.Do(retry.Default(), "git lfs push", func() error {
+			return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "lfs", "push", "--all", tgtURL)
+		})
+		if lfsPushErr != nil {
+			sp.StopFail()
+			return fmt.Errorf("LFS push failed: %w", lfsPushErr)
+		}
+		sp.Stop()
 	}
 
 	return nil
@@ -65,6 +105,16 @@ func CopyWiki(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tg
 	}
 
 	return nil
+}
+
+// hasLFSObjects checks if a repo has .gitattributes with LFS filter entries.
+func hasLFSObjects(repoPath string) bool {
+	cmd := exec.Command("git", "-C", repoPath, "show", "HEAD:.gitattributes")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(out), "filter=lfs")
 }
 
 // runGitCmd executes a git command, sanitizing any token from output to prevent leakage.

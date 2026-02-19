@@ -121,3 +121,93 @@ func listAllObjects(repoPath string) ([]string, error) {
 	}
 	return objects, nil
 }
+
+// VerifyObjectsSince compares objects created after a given SHA or date.
+func VerifyObjectsSince(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, since string, verbose bool) (*CheckResult, error) {
+	result := &CheckResult{
+		Name:   "Incremental Object Verification",
+		Status: StatusPass,
+	}
+
+	srcPath, srcCleanup, err := cloneBareTmp(srcHost, srcOwner, srcName, srcToken, "src-inc")
+	if err != nil {
+		result.Status = StatusFail
+		result.Details = fmt.Sprintf("Failed to clone source: %v", err)
+		return result, nil
+	}
+	defer srcCleanup()
+
+	tgtPath, tgtCleanup, err := cloneBareTmp(tgtHost, tgtOrg, tgtName, tgtToken, "tgt-inc")
+	if err != nil {
+		result.Status = StatusFail
+		result.Details = fmt.Sprintf("Failed to clone target: %v", err)
+		return result, nil
+	}
+	defer tgtCleanup()
+
+	srcObjects, err := listObjectsSince(srcPath, since)
+	if err != nil {
+		result.Status = StatusFail
+		result.Details = fmt.Sprintf("Failed to enumerate source objects: %v", err)
+		return result, nil
+	}
+
+	tgtObjects, err := listObjectsSince(tgtPath, since)
+	if err != nil {
+		result.Status = StatusFail
+		result.Details = fmt.Sprintf("Failed to enumerate target objects: %v", err)
+		return result, nil
+	}
+
+	srcSet := make(map[string]bool)
+	for _, obj := range srcObjects {
+		srcSet[obj] = true
+	}
+	tgtSet := make(map[string]bool)
+	for _, obj := range tgtObjects {
+		tgtSet[obj] = true
+	}
+
+	var missing int
+	for obj := range srcSet {
+		if !tgtSet[obj] {
+			missing++
+		}
+	}
+
+	if missing > 0 {
+		result.Status = StatusFail
+		result.Details = fmt.Sprintf("%d objects since %s in source missing from target", missing, since)
+	} else {
+		result.Details = fmt.Sprintf("All %d objects since %s match", len(srcObjects), since)
+	}
+
+	return result, nil
+}
+
+// listObjectsSince lists objects reachable from commits after the given reference.
+func listObjectsSince(repoPath, since string) ([]string, error) {
+	// Try as SHA first (since..HEAD), fall back to --since=date
+	cmd := exec.Command("git", "-C", repoPath, "rev-list", "--objects", "--all", "--after="+since)
+	out, err := cmd.Output()
+	if err != nil {
+		// Try as SHA range
+		cmd = exec.Command("git", "-C", repoPath, "rev-list", "--objects", "--all", since+"..HEAD")
+		out, err = cmd.Output()
+		if err != nil {
+			return nil, fmt.Errorf("git rev-list --since failed: %w", err)
+		}
+	}
+
+	var objects []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) >= 1 {
+			objects = append(objects, parts[0])
+		}
+	}
+	return objects, nil
+}

@@ -11,8 +11,16 @@ A CLI tool that copies GitHub repositories between organizations (Cloud and Ente
   3. Root tree hash comparison per branch
   4. GPG/SSH commit signature preservation check
   5. Git bundle SHA-256 checksum verification
+- **Git LFS support**: `--lfs` flag to include LFS objects (auto-detects and warns if LFS is present)
 - **Flexible authentication**: auto-detects `gh` CLI tokens, falls back to PAT
 - **Metadata migration** (optional): issues, pull requests, wiki, releases
+- **Quick verification**: `--quick-verify` for fast ref + tree hash checks only
+- **Incremental verification**: `--since` to verify only new objects since a date or SHA
+- **Skip verification**: `--skip-verify` for copy-only workflows (verify later with `--verify-only`)
+- **Attestation Signature**: `--sign` to GPG-sign the verification report for tamper-proof audit trails
+- **Config file**: `--config` for repeatable YAML-based configuration
+- **Retry with backoff**: automatic retry on transient network/API failures
+- **Progress indicators**: animated spinners for long-running operations
 - **Audit trail**: colored terminal report + optional JSON output
 - **Cross-platform**: single binary for Windows, macOS, Linux
 
@@ -185,6 +193,7 @@ A git bundle is created from both source and target repos. SHA-256 checksums are
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-h`, `--help` | | Show help and usage information |
+| `--config` | | Path to YAML config file |
 | `--source-host` | `github.com` | Source GitHub host |
 | `--target-host` | `github.com` | Target GitHub host |
 | `--target-name` | same as source | Target repo name |
@@ -192,13 +201,18 @@ A git bundle is created from both source and target repos. SHA-256 checksums are
 | `--source-token` | | PAT for source |
 | `--target-token` | | PAT for target |
 | `--public` | `false` | Source repo is public (skip source auth) |
+| `--lfs` | `false` | Include Git LFS objects in copy |
 | `--issues` | `false` | Copy issues |
 | `--pull-requests` | `false` | Copy pull requests |
 | `--wiki` | `false` | Copy wiki |
 | `--releases` | `false` | Copy releases and artifacts |
 | `--all-metadata` | `false` | Copy all metadata |
 | `--verify-only` | `false` | Skip copy, only verify |
+| `--skip-verify` | `false` | Skip verification (copy only) |
+| `--quick-verify` | `false` | Quick verify (refs + trees only) |
+| `--since` | | Incremental verify: objects after this SHA or date |
 | `--report` | | Path for JSON report |
+| `--sign` | | GPG key ID for Attestation Signature |
 | `--verbose` | `false` | Verbose output |
 | `--dry-run` | `false` | Show plan without executing |
 
@@ -215,3 +229,109 @@ A git bundle is created from both source and target repos. SHA-256 checksums are
 - **Tokens are never logged**: Tokens embedded in git clone URLs are stripped from any output shown to the user.
 - **Temp files are cleaned up**: All temporary directories (bare clones, bundles, asset uploads) are removed after use via `defer`.
 - **Private by default**: Target repositories are created as private.
+
+## Git LFS Support
+
+Use `--lfs` to include Git LFS objects in the copy:
+
+```bash
+vcopy myorg/lfs-repo target-org --lfs
+```
+
+If a repository uses LFS but `--lfs` is not specified, vcopy will detect this and print a warning. Without `--lfs`, LFS pointer files are copied but the actual large files are not.
+
+**Requirements**: `git-lfs` must be installed and available in PATH.
+
+## Quick and Incremental Verification
+
+### Quick verify (fast)
+
+Runs only ref comparison and tree hash checks, skipping the slower object enumeration, signature verification, and bundle checksum:
+
+```bash
+vcopy myorg/myrepo target-org --quick-verify
+```
+
+### Incremental verify
+
+Only verifies objects created after a given date or commit SHA. Useful for repeat syncs:
+
+```bash
+vcopy myorg/myrepo target-org --verify-only --since "2025-06-01"
+vcopy myorg/myrepo target-org --verify-only --since abc123def
+```
+
+### Skip verification
+
+Copy now, verify later:
+
+```bash
+vcopy myorg/myrepo target-org --skip-verify
+# Later:
+vcopy myorg/myrepo target-org --verify-only
+```
+
+## Attestation Signature
+
+Sign the verification report with GPG to create a tamper-proof audit trail:
+
+```bash
+vcopy myorg/myrepo target-org --report audit.json --sign "your-gpg-key-id"
+```
+
+The signed report includes an `attestation` field containing the GPG key ID and detached signature over the SHA-256 hash of the report data. This proves:
+- Who verified the copy (the key owner)
+- When the verification was performed
+- That the report has not been modified since signing
+
+**Requirements**: `gpg` must be installed with the specified key available.
+
+## Config File
+
+For repeated use or scheduled syncs, use a YAML config file instead of flags:
+
+```bash
+vcopy --config mirror.yaml
+```
+
+CLI flags override config file values. Example `mirror.yaml`:
+
+```yaml
+source:
+  repo: myorg/myrepo
+  host: github.com
+  public: false
+
+target:
+  org: target-org
+  host: github.mycompany.com
+  name: my-mirror
+
+auth:
+  method: auto
+
+copy:
+  issues: true
+  wiki: true
+  releases: true
+
+verify:
+  quick: true
+
+lfs: true
+
+report:
+  path: audit.json
+  sign_key: ABCD1234
+```
+
+See `example-config.yaml` in the repository for a complete template.
+
+## Retry Behavior
+
+vcopy automatically retries failed git operations and API calls with exponential backoff:
+- **Max attempts**: 3
+- **Initial wait**: 1 second
+- **Max wait**: 30 seconds
+
+This handles transient network failures and GitHub API rate limits gracefully.

@@ -1,0 +1,29 @@
+source:
+  repo: myorg/myrepo
+  host: github.com
+  public: false
+
+target:
+  org: target-org
+  host: github.mycompany.com
+  name: my-mirror
+
+auth:
+  method: auto
+
+copy:
+  issues: true
+  pull_requests: false
+  wiki: true
+  releases: true
+
+verify:
+  quick: true
+  skip: false
+
+lfs: true
+verbose: false
+
+report:
+  path: audit.json
+  sign_key: ABCD1234
