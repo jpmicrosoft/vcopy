@@ -184,6 +184,7 @@ A git bundle is created from both source and target repos. SHA-256 checksums are
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `-h`, `--help` | | Show help and usage information |
 | `--source-host` | `github.com` | Source GitHub host |
 | `--target-host` | `github.com` | Target GitHub host |
 | `--target-name` | same as source | Target repo name |
