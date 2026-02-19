@@ -46,7 +46,9 @@ func NewClient(host, token string) *Client {
 	}
 }
 
-// CreateRepo creates a repository in the specified organization.
+// CreateRepo creates a repository in the specified organization or user account.
+// It first tries the org endpoint; if the target is a personal account (404), it
+// falls back to creating under the authenticated user.
 func (c *Client) CreateRepo(org, name string, verbose bool) error {
 	repo := &gh.Repository{
 		Name:    gh.String(name),
@@ -58,6 +60,26 @@ func (c *Client) CreateRepo(org, name string, verbose bool) error {
 		if resp != nil && resp.StatusCode == http.StatusUnprocessableEntity {
 			if verbose {
 				fmt.Printf("  Repository %s/%s already exists, continuing...\n", org, name)
+			}
+			return nil
+		}
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			// org endpoint returned 404 — target is likely a personal account
+			if verbose {
+				fmt.Printf("  %s is not an org, creating under personal account...\n", org)
+			}
+			_, resp2, err2 := c.API.Repositories.Create(c.ctx, "", repo)
+			if err2 != nil {
+				if resp2 != nil && resp2.StatusCode == http.StatusUnprocessableEntity {
+					if verbose {
+						fmt.Printf("  Repository %s/%s already exists, continuing...\n", org, name)
+					}
+					return nil
+				}
+				return fmt.Errorf("failed to create repo %s/%s: %w", org, name, err2)
+			}
+			if verbose {
+				fmt.Printf("  Created repository %s/%s\n", org, name)
 			}
 			return nil
 		}
