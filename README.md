@@ -259,6 +259,16 @@ vcopy myorg/myrepo target-org --force
 
 > ⚠️ **WARNING**: A mirror push to an existing repository will **permanently delete** any branches, tags, or commits in the target that do not exist in the source. This cannot be undone.
 
+## Hidden Refs (refs/pull/*)
+
+GitHub creates read-only `refs/pull/*/head` and `refs/pull/*/merge` refs for every pull request. These are internal to GitHub and cannot be pushed to another repository.
+
+vcopy automatically handles this:
+- **During copy**: PR refs are stripped from the bare clone before mirror push
+- **During verification**: PR refs are excluded from ref comparison and bundle checksums
+
+This means all branches, tags, and commit history are copied and verified, but PR refs are intentionally excluded. If you need PR metadata, use the `--pull-requests` flag to migrate PRs as issues.
+
 ## Git LFS Support
 
 Use `--lfs` to include Git LFS objects in the copy:
