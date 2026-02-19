@@ -10,7 +10,7 @@ A CLI tool that copies GitHub repositories between organizations (Cloud and Ente
   2. Branch/tag ref comparison
   3. Root tree hash comparison per branch
   4. GPG/SSH commit signature preservation check
-  5. Git bundle SHA-256 checksum verification
+  5. Git bundle integrity verification
 - **Git LFS support**: `--lfs` flag to include LFS objects (auto-detects and warns if LFS is present)
 - **Flexible authentication**: auto-detects `gh` CLI tokens, falls back to PAT
 - **Metadata migration** (optional): issues, pull requests, wiki, releases
@@ -185,8 +185,8 @@ For each branch tip, the root tree hash is compared. This verifies the complete 
 ### Commit Signature Verification
 For signed commits (GPG or SSH), vcopy verifies that signatures are preserved and intact after copying. Reports warnings if signatures are lost.
 
-### Bundle Checksum Verification
-A git bundle is created from both source and target repos. SHA-256 checksums are computed and compared to verify byte-level transfer integrity.
+### Bundle Integrity Verification
+A git bundle is created from both source and target repos. Each bundle is verified for structural validity with `git bundle verify`, then the refs inside each bundle are compared to confirm they point to identical commits. SHA-256 checksums are computed and included in the report for audit purposes.
 
 ## Flags Reference
 
@@ -265,7 +265,7 @@ GitHub creates read-only `refs/pull/*/head` and `refs/pull/*/merge` refs for eve
 
 vcopy automatically handles this:
 - **During copy**: PR refs are stripped from the bare clone before mirror push
-- **During verification**: PR refs are excluded from ref comparison and bundle checksums
+- **During verification**: PR refs are excluded from ref comparison and bundle integrity checks
 
 This means all branches, tags, and commit history are copied and verified, but PR refs are intentionally excluded. If you need PR metadata, use the `--pull-requests` flag to migrate PRs as issues.
 
@@ -285,7 +285,7 @@ If a repository uses LFS but `--lfs` is not specified, vcopy will detect this an
 
 ### Quick verify (fast)
 
-Runs only ref comparison and tree hash checks, skipping the slower object enumeration, signature verification, and bundle checksum:
+Runs only ref comparison and tree hash checks, skipping the slower object enumeration, signature verification, and bundle integrity:
 
 ```bash
 vcopy myorg/myrepo target-org --quick-verify

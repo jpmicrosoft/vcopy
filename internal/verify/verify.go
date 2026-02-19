@@ -81,7 +81,7 @@ func RunAll(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtT
 		{"Object Hashes", VerifyObjects, true},
 		{"Tree Hashes", VerifyTrees, false},
 		{"Commit Signatures", VerifySignatures, true},
-		{"Bundle Checksum", VerifyBundle, true},
+		{"Bundle Integrity", VerifyBundle, true},
 	}
 
 	for _, check := range checks {
