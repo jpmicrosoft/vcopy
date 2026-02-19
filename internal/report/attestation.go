@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -55,9 +56,32 @@ func VerifyAttestation(report *verify.VerificationReport) (bool, error) {
 
 	hash := fmt.Sprintf("%x", sha256.Sum256(data))
 
-	// Verify with GPG
-	cmd := exec.Command("gpg", "--verify", "/dev/stdin")
-	cmd.Stdin = strings.NewReader(att.Signature + "\n" + hash)
+	// Write signature to temp file for gpg --verify
+	sigFile, err := os.CreateTemp("", "vcopy-sig-*.asc")
+	if err != nil {
+		return false, fmt.Errorf("failed to create temp sig file: %w", err)
+	}
+	defer os.Remove(sigFile.Name())
+	if _, err := sigFile.WriteString(att.Signature); err != nil {
+		sigFile.Close()
+		return false, fmt.Errorf("failed to write sig file: %w", err)
+	}
+	sigFile.Close()
+
+	// Write hash to temp file as signed data
+	dataFile, err := os.CreateTemp("", "vcopy-data-*.txt")
+	if err != nil {
+		return false, fmt.Errorf("failed to create temp data file: %w", err)
+	}
+	defer os.Remove(dataFile.Name())
+	if _, err := dataFile.WriteString(hash); err != nil {
+		dataFile.Close()
+		return false, fmt.Errorf("failed to write data file: %w", err)
+	}
+	dataFile.Close()
+
+	// gpg --verify <signature-file> <signed-data-file>
+	cmd := exec.Command("gpg", "--verify", sigFile.Name(), dataFile.Name())
 	if err := cmd.Run(); err != nil {
 		return false, fmt.Errorf("attestation verification failed: %w", err)
 	}

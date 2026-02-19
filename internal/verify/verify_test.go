@@ -56,3 +56,29 @@ func TestStatusConstants(t *testing.T) {
 		t.Errorf("StatusSkip = %q", StatusSkip)
 	}
 }
+
+func TestValidateSince(t *testing.T) {
+	valid := []string{
+		"2025-06-01",
+		"2025-06-01T12:00:00Z",
+		"abc123def456",
+		"a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+	}
+	for _, v := range valid {
+		if err := validateSince(v); err != nil {
+			t.Errorf("validateSince(%q) unexpected error: %v", v, err)
+		}
+	}
+
+	invalid := []string{
+		"--upload-pack=evil",
+		"-x",
+		"foo;bar",
+		"abc$(cmd)",
+	}
+	for _, v := range invalid {
+		if err := validateSince(v); err == nil {
+			t.Errorf("validateSince(%q) expected error, got nil", v)
+		}
+	}
+}

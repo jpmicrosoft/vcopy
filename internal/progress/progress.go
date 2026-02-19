@@ -51,9 +51,11 @@ func (s *Spinner) Stop() {
 
 // StopFail stops the spinner and marks it as failed.
 func (s *Spinner) StopFail() {
-	s.msg = s.msg + " (failed)"
+	// Close first to stop the goroutine, then update msg safely before Wait returns
+	// the final print in run() with ✓ is acceptable — we override with ✗ below.
 	close(s.done)
 	s.wg.Wait()
+	fmt.Printf("\r  ✗ %s (failed)\n", s.msg)
 }
 
 // Step prints a progress step message.

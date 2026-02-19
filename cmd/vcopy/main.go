@@ -97,9 +97,12 @@ if len(args) >= 2 {
 sourceRepo = args[0]
 targetOrg = args[1]
 } else if configPath != "" {
-cfg, _ := config.Load(configPath)
-sourceRepo = cfg.Source.Repo
-targetOrg = cfg.Target.Org
+cfgArgs, err := config.Load(configPath)
+if err != nil {
+return fmt.Errorf("config error on re-read: %w", err)
+}
+sourceRepo = cfgArgs.Source.Repo
+targetOrg = cfgArgs.Target.Org
 } else {
 return fmt.Errorf("requires 2 arguments: <source-repo> <target-org> (or use --config)")
 }
