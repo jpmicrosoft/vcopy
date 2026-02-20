@@ -107,6 +107,9 @@ func CopyWiki(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tg
 		return fmt.Errorf("wiki clone failed (wiki may not exist): %w", err)
 	}
 
+	// Remove hidden refs before push (same as main repo)
+	_ = removeHiddenRefs(wikiPath, verbose)
+
 	if err := runGitCmd(false, srcToken, tgtToken, &wikiPath, "push", "--mirror", tgtURL); err != nil {
 		return fmt.Errorf("wiki push failed: %w", err)
 	}
