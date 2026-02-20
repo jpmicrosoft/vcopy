@@ -80,8 +80,9 @@ func createAndVerifyBundle(host, owner, repo, token, prefix string, verbose bool
 	}
 	defer os.RemoveAll(tmpDir)
 
-	repoPath := filepath.Join(tmpDir, repo+".git")
-	bundlePath := filepath.Join(tmpDir, repo+".bundle")
+	safeName := sanitizeRepoName(repo)
+	repoPath := filepath.Join(tmpDir, safeName+".git")
+	bundlePath := filepath.Join(tmpDir, safeName+".bundle")
 
 	// Bare clone
 	if verbose {

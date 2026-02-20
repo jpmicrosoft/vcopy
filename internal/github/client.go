@@ -214,6 +214,12 @@ func (c *Client) CreateRelease(owner, repo string, release *gh.RepositoryRelease
 	return r, err
 }
 
+// DeleteRelease deletes a release by its ID. Does not delete the associated tag.
+func (c *Client) DeleteRelease(owner, repo string, releaseID int64) error {
+	_, err := c.API.Repositories.DeleteRelease(c.ctx, owner, repo, releaseID)
+	return err
+}
+
 // DownloadReleaseAsset downloads a release asset and returns the HTTP response body.
 // Caller is responsible for closing the response body.
 func (c *Client) DownloadReleaseAsset(owner, repo string, assetID int64) (*http.Response, error) {
