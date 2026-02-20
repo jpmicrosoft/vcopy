@@ -144,7 +144,7 @@ func cloneBareTmp(host, owner, repo, token, prefix string) (string, func(), erro
 		return "", nil, err
 	}
 
-	repoPath := filepath.Join(tmpDir, repo+".git")
+	repoPath := filepath.Join(tmpDir, sanitizeRepoName(repo)+".git")
 	cmd := exec.Command("git", "clone", "--bare", url, repoPath)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if err := cmd.Run(); err != nil {

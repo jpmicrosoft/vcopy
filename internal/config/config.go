@@ -47,7 +47,6 @@ type CopyConfig struct {
 	Issues       bool `yaml:"issues"`
 	PullRequests bool `yaml:"pull_requests"`
 	Wiki         bool `yaml:"wiki"`
-	Releases     bool `yaml:"releases"`
 	AllMetadata  bool `yaml:"all_metadata"`
 }
 
@@ -93,7 +92,6 @@ func Load(path string) (*Config, error) {
 		cfg.Copy.Issues = true
 		cfg.Copy.PullRequests = true
 		cfg.Copy.Wiki = true
-		cfg.Copy.Releases = true
 	}
 
 	return cfg, nil

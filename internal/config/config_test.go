@@ -126,7 +126,7 @@ copy:
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if !cfg.Copy.Issues || !cfg.Copy.PullRequests || !cfg.Copy.Wiki || !cfg.Copy.Releases {
+	if !cfg.Copy.Issues || !cfg.Copy.PullRequests || !cfg.Copy.Wiki {
 		t.Error("all_metadata should set all copy flags to true")
 	}
 }

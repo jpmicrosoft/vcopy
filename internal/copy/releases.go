@@ -19,6 +19,42 @@ func SyncReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRep
 	return syncReleases(src, tgt, srcOwner, srcRepo, tgtOwner, tgtRepo, verbose, true)
 }
 
+// CleanTargetReleases deletes all releases in the target repo that don't exist
+// in the source. Used by --force to prevent orphaned releases after mirror push.
+func CleanTargetReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRepo string, verbose bool) error {
+	srcReleases, err := src.ListReleases(srcOwner, srcRepo)
+	if err != nil {
+		return fmt.Errorf("failed to list source releases: %w", err)
+	}
+	srcTags := make(map[string]bool)
+	for _, r := range srcReleases {
+		srcTags[r.GetTagName()] = true
+	}
+
+	tgtReleases, err := tgt.ListReleases(tgtOwner, tgtRepo)
+	if err != nil {
+		return fmt.Errorf("failed to list target releases: %w", err)
+	}
+
+	var deleted int
+	for _, r := range tgtReleases {
+		if !srcTags[r.GetTagName()] {
+			if verbose {
+				fmt.Printf("  Deleting orphaned release: %s (id %d)\n", r.GetTagName(), r.GetID())
+			}
+			if err := tgt.DeleteRelease(tgtOwner, tgtRepo, r.GetID()); err != nil {
+				fmt.Printf("  Warning: failed to delete release %s: %v\n", r.GetTagName(), err)
+				continue
+			}
+			deleted++
+		}
+	}
+	if deleted > 0 {
+		fmt.Printf("  Cleaned up %d orphaned releases from target\n", deleted)
+	}
+	return nil
+}
+
 func syncReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRepo string, verbose, incrementalOnly bool) error {
 	releases, err := src.ListReleases(srcOwner, srcRepo)
 	if err != nil {

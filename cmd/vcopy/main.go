@@ -29,7 +29,6 @@ codeOnly     bool
 copyIssues   bool
 copyPRs      bool
 copyWiki     bool
-copyReleases bool
 allMetadata  bool
 verifyOnly   bool
 skipVerify   bool
@@ -71,8 +70,7 @@ f.BoolVar(&codeOnly, "code-only", false, "Copy source code only (branches/commit
 f.BoolVar(&copyIssues, "issues", false, "Copy issues")
 f.BoolVar(&copyPRs, "pull-requests", false, "Copy pull requests")
 f.BoolVar(&copyWiki, "wiki", false, "Copy wiki")
-f.BoolVar(&copyReleases, "releases", false, "Copy releases and artifacts")
-f.BoolVar(&allMetadata, "all-metadata", false, "Copy all metadata (issues, PRs, wiki, releases)")
+f.BoolVar(&allMetadata, "all-metadata", false, "Copy all metadata (issues, PRs, wiki)")
 f.BoolVar(&verifyOnly, "verify-only", false, "Skip copy, only verify existing source vs target")
 f.BoolVar(&skipVerify, "skip-verify", false, "Skip verification (copy only)")
 f.BoolVar(&quickVerify, "quick-verify", false, "Quick verification (refs + tree hashes only)")
@@ -117,7 +115,6 @@ if allMetadata {
 copyIssues = true
 copyPRs = true
 copyWiki = true
-copyReleases = true
 }
 
 // Resolve target repo name
@@ -135,7 +132,8 @@ fmt.Println("=== DRY RUN ===")
 fmt.Printf("Source:      %s/%s (public: %v)\n", sourceHost, sourceRepo, publicSource)
 fmt.Printf("Target:      %s/%s/%s\n", targetHost, targetOrg, repoName)
 fmt.Printf("LFS:         %v\n", lfs)
-fmt.Printf("Metadata:    issues=%v, PRs=%v, wiki=%v, releases=%v\n", copyIssues, copyPRs, copyWiki, copyReleases)
+fmt.Printf("Metadata:    issues=%v, PRs=%v, wiki=%v\n", copyIssues, copyPRs, copyWiki)
+		fmt.Printf("Code only:   %v\n", codeOnly)
 fmt.Printf("Verify:      skip=%v, quick=%v, only=%v, since=%q\n", skipVerify, quickVerify, verifyOnly, since)
 fmt.Printf("Report:      %s\n", reportPath)
 fmt.Printf("Attestation: %s\n", signKey)
@@ -147,7 +145,7 @@ var srcToken, tgtToken string
 var err error
 if publicSource {
 fmt.Println("Public source mode: skipping source authentication")
-if copyIssues || copyPRs || copyReleases {
+if copyIssues || copyPRs {
 fmt.Println("Note: Metadata copy from public repos uses unauthenticated API access (60 req/hr rate limit).")
 fmt.Println("      For repos with many issues/PRs/releases, consider providing a source token for higher limits.")
 }
@@ -220,11 +218,22 @@ fmt.Println("Syncing new releases to target (existing releases preserved)...")
 if err := vcopy.SyncReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
 fmt.Printf("Warning: release sync failed: %v\n", err)
 }
-} else {
-fmt.Println("Copying releases...")
-if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-fmt.Printf("Warning: release copy failed: %v\n", err)
-}
+		} else if exists && forceOverwrite {
+			// --force on existing repo: clean orphaned releases, then copy all from source
+			fmt.Println("Cleaning orphaned releases from target...")
+			if err := vcopy.CleanTargetReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+				fmt.Printf("Warning: release cleanup failed: %v\n", err)
+			}
+			fmt.Println("Copying releases...")
+			if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+				fmt.Printf("Warning: release copy failed: %v\n", err)
+			}
+		} else {
+			// New repo: copy all releases from source
+			fmt.Println("Copying releases...")
+			if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+				fmt.Printf("Warning: release copy failed: %v\n", err)
+			}
 }
 } else if verbose {
 fmt.Println("  Skipping tags and releases (--code-only mode)")
@@ -323,7 +332,6 @@ if !codeOnly { codeOnly = cfg.CodeOnly }
 if !copyIssues { copyIssues = cfg.Copy.Issues }
 if !copyPRs { copyPRs = cfg.Copy.PullRequests }
 if !copyWiki { copyWiki = cfg.Copy.Wiki }
-if !copyReleases { copyReleases = cfg.Copy.Releases }
 if !allMetadata { allMetadata = cfg.Copy.AllMetadata }
 if !skipVerify { skipVerify = cfg.Verify.Skip }
 if !quickVerify { quickVerify = cfg.Verify.QuickMode }

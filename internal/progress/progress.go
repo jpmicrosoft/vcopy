@@ -11,6 +11,7 @@ type Spinner struct {
 	msg  string
 	done chan bool // true = failed, false = success
 	wg   sync.WaitGroup
+	once sync.Once
 }
 
 // Start begins a spinner with the given message.
@@ -49,13 +50,13 @@ func (s *Spinner) run() {
 
 // Stop stops the spinner and marks it as complete.
 func (s *Spinner) Stop() {
-	s.done <- false
+	s.once.Do(func() { s.done <- false })
 	s.wg.Wait()
 }
 
 // StopFail stops the spinner and marks it as failed.
 func (s *Spinner) StopFail() {
-	s.done <- true
+	s.once.Do(func() { s.done <- true })
 	s.wg.Wait()
 }
 

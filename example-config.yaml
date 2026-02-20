@@ -15,14 +15,15 @@ copy:
   issues: true
   pull_requests: false
   wiki: true
-  releases: true
+  # releases sync automatically — no flag needed
 
 verify:
   quick: true
   skip: false
 
 lfs: true
-force: false  # Set to true to allow pushing to existing target repos (still prompts for confirmation)
+force: false     # Set to true to do destructive mirror push (still prompts for confirmation)
+code_only: false # Set to true to copy only branches/commits (no tags, releases, or metadata)
 verbose: false
 
 report:

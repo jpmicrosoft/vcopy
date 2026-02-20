@@ -5,6 +5,8 @@ A CLI tool that copies GitHub repositories between organizations (Cloud and Ente
 ## Features
 
 - **Verified mirroring** of all branches, tags, and commit history
+- **Smart release sync**: tags and releases auto-sync; additive by default (preserves target-only content)
+- **Code-only mode**: `--code-only` to copy branches/commits without tags or releases
 - **5-layer integrity verification**:
   1. Git object hash verification (every commit, tree, blob)
   2. Branch/tag ref comparison
@@ -13,7 +15,7 @@ A CLI tool that copies GitHub repositories between organizations (Cloud and Ente
   5. Git bundle integrity verification
 - **Git LFS support**: `--lfs` flag to include LFS objects (auto-detects and warns if LFS is present)
 - **Flexible authentication**: auto-detects `gh` CLI tokens, falls back to PAT
-- **Metadata migration** (optional): issues, pull requests, wiki, releases
+- **Metadata migration** (optional): issues, pull requests, wiki
 - **Quick verification**: `--quick-verify` for fast ref + tree hash checks only
 - **Incremental verification**: `--since` to verify only new objects since a date or SHA
 - **Skip verification**: `--skip-verify` for copy-only workflows (verify later with `--verify-only`)
@@ -114,7 +116,7 @@ vcopy myorg/myrepo target-org --all-metadata
 ### Copy with specific metadata
 
 ```bash
-vcopy myorg/myrepo target-org --issues --releases
+vcopy myorg/myrepo target-org --issues --wiki
 ```
 
 ### Verify only (no copy)
@@ -146,7 +148,7 @@ Use the `--public` flag when the source repository is publicly accessible. This 
 | Git clone/push | ✅ No source token needed | Requires source token |
 | Verification (refs, objects, trees, bundle) | ✅ No source token needed | Requires source token |
 | Commit signature verification | ✅ No source token needed | Requires source token |
-| Metadata copy (issues, PRs, releases) | ⚠️ Works but rate-limited (60 req/hr) | Full rate limit (5,000 req/hr) |
+| Metadata copy (issues, PRs) | ⚠️ Works but rate-limited (60 req/hr) | Full rate limit (5,000 req/hr) |
 | Wiki copy | ✅ No source token needed | Requires source token |
 
 ### Examples
@@ -192,6 +194,8 @@ After copying a repository, vcopy runs **5 independent checks** to confirm nothi
 
 If **all 5 pass**, you have cryptographic proof the copy is identical to the source. If any fail, the report tells you exactly what differs.
 
+> **Note**: In `--code-only` mode, Ref Comparison and Bundle Integrity are skipped because they depend on tags matching. The remaining 3 checks (Object Hashes, Tree Hashes, Commit Signatures) still run to verify branch integrity.
+
 ## Verification Technical Details
 
 ### 1. Branch/Tag Ref Comparison
@@ -214,30 +218,29 @@ Creates a `git bundle` from each repo (a self-contained archive of all refs and 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-h`, `--help` | | Show help and usage information |
-| `--config` | | Path to YAML config file |
-| `--source-host` | `github.com` | Source GitHub host |
-| `--target-host` | `github.com` | Target GitHub host |
-| `--target-name` | same as source | Target repo name |
-| `--auth-method` | `auto` | Auth method: `auto`, `gh`, `pat` |
-| `--source-token` | | PAT for source |
-| `--target-token` | | PAT for target |
-| `--public` | `false` | Source repo is public (skip source auth) |
-| `--lfs` | `false` | Include Git LFS objects in copy |
-| `--force` | `false` | Destructive mirror push to existing target (overwrites everything, requires confirmation) |
-| `--code-only` | `false` | Copy only branches/commits (no tags, releases, or metadata) |
-| `--issues` | `false` | Copy issues |
-| `--pull-requests` | `false` | Copy pull requests |
-| `--wiki` | `false` | Copy wiki |
-| `--releases` | `false` | *(No longer needed — releases sync automatically)* |
-| `--all-metadata` | `false` | Copy all metadata (issues, PRs, wiki) |
-| `--verify-only` | `false` | Skip copy, only verify |
-| `--skip-verify` | `false` | Skip verification (copy only) |
-| `--quick-verify` | `false` | Quick verify (refs + trees only) |
-| `--since` | | Incremental verify: objects after this SHA or date |
-| `--report` | | Path for JSON report |
-| `--sign` | | GPG key ID for Attestation Signature |
-| `--verbose` | `false` | Verbose output |
-| `--dry-run` | `false` | Show plan without executing |
+| `--config` | | Path to a YAML config file for repeatable setups (see [Config File](#config-file)) |
+| `--source-host` | `github.com` | Hostname of the source GitHub instance (e.g., `github.mycompany.com` for Enterprise) |
+| `--target-host` | `github.com` | Hostname of the target GitHub instance |
+| `--target-name` | same as source | Name for the repo in the target org (defaults to the source repo's name) |
+| `--auth-method` | `auto` | How to authenticate: `auto` tries gh CLI then PAT prompt, `gh` uses gh CLI only, `pat` uses tokens only |
+| `--source-token` | | Personal Access Token for the source instance (avoids interactive prompt) |
+| `--target-token` | | Personal Access Token for the target instance (avoids interactive prompt) |
+| `--public` | `false` | Source repo is publicly accessible — skips source authentication entirely, only target credentials needed |
+| `--lfs` | `false` | Include Git Large File Storage objects in the copy (requires `git-lfs` installed) |
+| `--force` | `false` | Destructive mirror push to an existing target repo — overwrites all branches, tags, and releases. Requires interactive `yes/no` confirmation |
+| `--code-only` | `false` | Copy only branches and commits — skips tags, releases, and all metadata. Verification skips tag-dependent checks |
+| `--issues` | `false` | Also migrate issues (titles, bodies, labels, comments) from source to target |
+| `--pull-requests` | `false` | Also migrate pull requests as issues in the target (GitHub API does not support creating true PRs) |
+| `--wiki` | `false` | Also copy the repository wiki (if one exists) |
+| `--all-metadata` | `false` | Shorthand for `--issues --pull-requests --wiki` — copies all optional metadata |
+| `--verify-only` | `false` | Run verification checks against an existing source and target without copying anything |
+| `--skip-verify` | `false` | Copy the repo but skip all verification checks (you can verify later with `--verify-only`) |
+| `--quick-verify` | `false` | Run only ref comparison and tree hash checks — faster but less thorough than full verification |
+| `--since` | | Only verify objects created after this date (`2025-06-01`) or commit SHA — useful for incremental re-syncs |
+| `--report` | | File path to write a detailed JSON verification report (e.g., `--report audit.json`) |
+| `--sign` | | GPG key ID to sign the verification report for tamper-proof audit trails (requires `gpg` installed) |
+| `--verbose` | `false` | Show detailed output for every step (git commands, API calls, skipped items) |
+| `--dry-run` | `false` | Show what would happen without actually copying or modifying anything |
 
 ## Requirements
 
@@ -253,6 +256,7 @@ Creates a `git bundle` from each repo (a self-contained archive of all refs and 
 - **Temp files are cleaned up**: All temporary directories (bare clones, bundles, asset uploads) are removed after use via `defer`.
 - **Private by default**: Target repositories are created as private.
 - **Input validation on `--since`**: The `--since` value is validated to prevent git flag injection; only hex SHAs and date strings are accepted.
+- **Path traversal protection**: Repository names are sanitized (`filepath.Base` + `..` removal) before use in temp directory paths to prevent directory escape.
 - **SSRF protection**: Release asset downloads validate URL scheme (https only) and use a timeout-limited HTTP client.
 - **Attestation uses proper GPG detached signatures**: Signing produces an armored detached signature; verification uses separate temp files for signature and data, matching GPG's expected `--verify <sig-file> <data-file>` protocol.
 - **Nil-safe metadata migration**: Issue, PR, and comment formatting guards against nil user pointers (deleted/ghost GitHub accounts) to prevent panics during metadata copy.
@@ -268,7 +272,7 @@ When the target repository already exists, vcopy uses **additive mode** by defau
 | Branches only in target | ✅ Preserved | ❌ Deleted |
 | New tags from source | ✅ Added | ✅ Added |
 | Existing tags in target | ✅ Preserved | ❌ Overwritten |
-| Existing releases in target | ✅ Preserved | ❌ Overwritten |
+| Existing releases in target | ✅ Preserved | ❌ Deleted and re-copied from source |
 | New releases from source | ✅ Synced | ✅ Copied |
 
 **Additive mode** (default when target exists):
@@ -378,12 +382,13 @@ auth:
 copy:
   issues: true
   wiki: true
-  releases: true
 
 verify:
   quick: true
 
 lfs: true
+force: false     # Destructive mirror push (requires confirmation)
+code_only: false # Copy only branches/commits (no tags or releases)
 
 report:
   path: audit.json

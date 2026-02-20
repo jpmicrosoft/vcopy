@@ -13,8 +13,9 @@ import (
 
 // SignReport adds a GPG attestation signature to the verification report.
 // The signature covers the SHA-256 hash of the report data (excluding the attestation field).
+// NOTE: Any existing attestation on the report is replaced.
 func SignReport(report *verify.VerificationReport, keyID string) error {
-	// Compute hash of report data without attestation
+	// Clear attestation so it is not included in the signed hash
 	report.Attestation = nil
 	data, err := json.Marshal(report)
 	if err != nil {

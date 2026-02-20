@@ -13,6 +13,17 @@ import (
 	"github.com/jaiperez/vcopy/internal/retry"
 )
 
+// sanitizeRepoName strips path separators and traversal sequences from a repo name
+// to prevent path traversal when used in file paths.
+func sanitizeRepoName(name string) string {
+	name = filepath.Base(name)
+	name = strings.ReplaceAll(name, "..", "")
+	if name == "" || name == "." {
+		name = "repo"
+	}
+	return name
+}
+
 // MirrorRepo performs a bare clone from source and pushes to target.
 // forceOverwrite: uses --mirror (destructive). codeOnly: pushes only branches (no tags).
 // Default (both false): pushes branches + new tags (additive).
@@ -26,7 +37,7 @@ func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 	}
 	defer os.RemoveAll(tmpDir)
 
-	mirrorPath := filepath.Join(tmpDir, srcName+".git")
+	mirrorPath := filepath.Join(tmpDir, sanitizeRepoName(srcName)+".git")
 
 	// Bare clone from source
 	sp := progress.Start(fmt.Sprintf("Cloning %s/%s/%s...", srcHost, srcOwner, srcName))
