@@ -152,6 +152,9 @@ func cloneBareTmp(host, owner, repo, token, prefix string) (string, func(), erro
 		return "", nil, fmt.Errorf("bare clone failed: %w", err)
 	}
 
+	// Remove hidden refs (refs/pull/*) so verification comparisons are accurate
+	removeHiddenRefsFromClone(repoPath)
+
 	cleanup := func() { os.RemoveAll(tmpDir) }
 	return repoPath, cleanup, nil
 }

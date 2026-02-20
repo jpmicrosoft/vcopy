@@ -171,22 +171,36 @@ vcopy large-org/big-repo my-org --public --issues --source-token ghp_xxx
 
 The `--public` flag controls whether source auth is *required* — you can always optionally provide a `--source-token` alongside it for better rate limits on metadata operations.
 
-## Verification Details
+## What Gets Verified
 
-### Git Object Hash Verification
-Every git object (commit, tree, blob) has a unique SHA hash. vcopy enumerates all objects on both source and target, verifying they match exactly.
+After copying a repository, vcopy runs **5 independent checks** to confirm nothing was lost or changed in transit. Think of it like a shipping manifest — every item is checked off:
 
-### Branch/Tag Ref Comparison
-All refs (branches and tags) are compared to ensure they point to the same commit SHAs on both source and target. Detects missing, extra, or diverged refs.
+| Check | What it answers | Analogy |
+|-------|----------------|---------|
+| **Ref Comparison** | Do all branches and tags exist and point to the same commits? | "Are all the shipping labels correct?" |
+| **Object Hashes** | Does every commit, file, and folder have the exact same content? | "Is every item in the box identical to the original?" |
+| **Tree Hashes** | Does each branch's directory structure and file contents match? | "Do the contents of each folder match?" |
+| **Commit Signatures** | Are GPG/SSH signatures on commits still intact? | "Are all the wax seals unbroken?" |
+| **Bundle Integrity** | Can both repos produce valid, equivalent git bundles? | "Can both warehouses produce identical inventories?" |
 
-### Tree Hash Comparison
-For each branch tip, the root tree hash is compared. This verifies the complete directory structure and file contents match.
+If **all 5 pass**, you have cryptographic proof the copy is identical to the source. If any fail, the report tells you exactly what differs.
 
-### Commit Signature Verification
-For signed commits (GPG or SSH), vcopy verifies that signatures are preserved and intact after copying. Reports warnings if signatures are lost.
+## Verification Technical Details
 
-### Bundle Integrity Verification
-A git bundle is created from both source and target repos. Each bundle is verified for structural validity with `git bundle verify`, then the refs inside each bundle are compared to confirm they point to identical commits. SHA-256 checksums are computed and included in the report for audit purposes.
+### 1. Branch/Tag Ref Comparison
+Uses `git ls-remote` on both source and target to enumerate all `refs/heads/*` and `refs/tags/*`. Compares the SHA-1/SHA-256 commit hash each ref points to. Detects missing refs, extra refs, or refs pointing to different commits. GitHub's hidden `refs/pull/*` are excluded (see [Hidden Refs](#hidden-refs-refspull)).
+
+### 2. Git Object Hash Verification
+Clones both repos bare, then runs `git rev-list --objects --all` to enumerate every reachable object (commits, trees, blobs). Each object's SHA hash is its content-addressable identity — if even a single byte differs, the hash changes. All source object hashes are checked against the target to confirm a 1:1 match.
+
+### 3. Tree Hash Comparison
+For each branch head, computes `git rev-parse <branch>^{tree}` on both repos. The tree hash is a recursive hash of the entire directory structure at that branch tip — file names, permissions, and content hashes. If the tree hashes match, the working directories are byte-for-byte identical.
+
+### 4. Commit Signature Verification
+Runs `git log --show-signature` on both repos to enumerate all GPG/SSH-signed commits. Compares the set of signed commit SHAs to ensure no signatures were dropped or corrupted during the mirror. Reports as a warning (not failure) if signatures differ, since some transfer methods may strip them.
+
+### 5. Bundle Integrity Verification
+Creates a `git bundle` from each repo (a self-contained archive of all refs and objects). Verifies each bundle passes `git bundle verify` (structural integrity). Then compares the refs listed inside each bundle using `git bundle list-heads` to confirm they match. SHA-256 checksums of each bundle file are included in the report for audit purposes, but are not compared directly because git bundle packing is non-deterministic.
 
 ## Flags Reference
 
@@ -264,8 +278,8 @@ vcopy myorg/myrepo target-org --force
 GitHub creates read-only `refs/pull/*/head` and `refs/pull/*/merge` refs for every pull request. These are internal to GitHub and cannot be pushed to another repository.
 
 vcopy automatically handles this:
-- **During copy**: PR refs are stripped from the bare clone before mirror push
-- **During verification**: PR refs are excluded from ref comparison and bundle integrity checks
+- **During copy**: PR refs are stripped from the bare clone before mirror push (main repo and wiki)
+- **During verification**: PR refs are excluded from ref comparison, object/tree/signature verification clones, and bundle integrity checks
 
 This means all branches, tags, and commit history are copied and verified, but PR refs are intentionally excluded. If you need PR metadata, use the `--pull-requests` flag to migrate PRs as issues.
 
