@@ -17,6 +17,7 @@ type Config struct {
 	Report   ReportConfig   `yaml:"report"`
 	LFS      bool           `yaml:"lfs"`
 	Force    bool           `yaml:"force"`
+	CodeOnly bool           `yaml:"code_only"`
 	Verbose  bool           `yaml:"verbose"`
 }
 

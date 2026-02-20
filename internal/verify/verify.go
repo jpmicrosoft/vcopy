@@ -52,6 +52,7 @@ func (r *VerificationReport) AllPassed() bool {
 // Options controls which verification checks to run.
 type Options struct {
 	QuickMode bool
+	CodeOnly  bool   // skip tag-dependent checks (ref comparison, bundle)
 	Since     string // SHA or date for incremental verification
 	Verbose   bool
 }
@@ -71,17 +72,18 @@ func RunAll(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtT
 	// Quick mode: only refs + trees
 	// Full mode: refs, objects, trees, signatures, bundle
 	type checkDef struct {
-		name      string
-		fn        checkFunc
-		quickSkip bool
+		name         string
+		fn           checkFunc
+		quickSkip    bool
+		codeOnlySkip bool
 	}
 
 	checks := []checkDef{
-		{"Ref Comparison", VerifyRefs, false},
-		{"Object Hashes", VerifyObjects, true},
-		{"Tree Hashes", VerifyTrees, false},
-		{"Commit Signatures", VerifySignatures, true},
-		{"Bundle Integrity", VerifyBundle, true},
+		{"Ref Comparison", VerifyRefs, false, true},
+		{"Object Hashes", VerifyObjects, true, false},
+		{"Tree Hashes", VerifyTrees, false, false},
+		{"Commit Signatures", VerifySignatures, true, false},
+		{"Bundle Integrity", VerifyBundle, true, true},
 	}
 
 	for _, check := range checks {
@@ -90,6 +92,14 @@ func RunAll(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtT
 				Name:    check.name,
 				Status:  StatusSkip,
 				Details: "Skipped (quick mode)",
+			})
+			continue
+		}
+		if opts.CodeOnly && check.codeOnlySkip {
+			report.Checks = append(report.Checks, CheckResult{
+				Name:    check.name,
+				Status:  StatusSkip,
+				Details: "Skipped (code-only mode, tags not copied)",
 			})
 			continue
 		}

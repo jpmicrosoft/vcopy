@@ -76,8 +76,15 @@ Required token scopes: `repo` (full control of private repositories).
 
 ### Basic copy (GitHub Cloud to Cloud)
 
+Copies all branches, tags, commits, and releases:
 ```bash
 vcopy myorg/myrepo target-org
+```
+
+### Code only (no tags or releases)
+
+```bash
+vcopy myorg/myrepo target-org --code-only
 ```
 
 ### Copy to GitHub Enterprise Server
@@ -216,12 +223,13 @@ Creates a `git bundle` from each repo (a self-contained archive of all refs and 
 | `--target-token` | | PAT for target |
 | `--public` | `false` | Source repo is public (skip source auth) |
 | `--lfs` | `false` | Include Git LFS objects in copy |
-| `--force` | `false` | Allow push to existing target repo (requires confirmation) |
+| `--force` | `false` | Destructive mirror push to existing target (overwrites everything, requires confirmation) |
+| `--code-only` | `false` | Copy only branches/commits (no tags, releases, or metadata) |
 | `--issues` | `false` | Copy issues |
 | `--pull-requests` | `false` | Copy pull requests |
 | `--wiki` | `false` | Copy wiki |
-| `--releases` | `false` | Copy releases and artifacts |
-| `--all-metadata` | `false` | Copy all metadata |
+| `--releases` | `false` | *(No longer needed — releases sync automatically)* |
+| `--all-metadata` | `false` | Copy all metadata (issues, PRs, wiki) |
 | `--verify-only` | `false` | Skip copy, only verify |
 | `--skip-verify` | `false` | Skip verification (copy only) |
 | `--quick-verify` | `false` | Quick verify (refs + trees only) |
@@ -251,27 +259,31 @@ Creates a `git bundle` from each repo (a self-contained archive of all refs and 
 
 ## Existing Repository Safety (`--force`)
 
-By default, vcopy **refuses** to push to a target repository that already exists. This prevents accidental data loss, since `git push --mirror` overwrites all branches, tags, and history in the target.
+When the target repository already exists, vcopy uses **additive mode** by default:
 
-To push to an existing repo, you must:
-1. Pass the `--force` flag
-2. Confirm with `yes` at the interactive prompt
+| What happens | Default (additive) | With `--force` (destructive) |
+|---|---|---|
+| New branches from source | ✅ Added | ✅ Added |
+| Existing branches in target | 🔄 Updated to match source | 🔄 Updated to match source |
+| Branches only in target | ✅ Preserved | ❌ Deleted |
+| New tags from source | ✅ Added | ✅ Added |
+| Existing tags in target | ✅ Preserved | ❌ Overwritten |
+| Existing releases in target | ✅ Preserved | ❌ Overwritten |
+| New releases from source | ✅ Synced | ✅ Copied |
 
+**Additive mode** (default when target exists):
 ```bash
-# This will be rejected if target-org/myrepo already exists:
+# Safe: existing tags and releases in target are preserved
 vcopy myorg/myrepo target-org
+```
 
-# Use --force to allow overwriting (you will be prompted to confirm):
+**Destructive mode** (`--force`): uses `git push --mirror` which replaces everything. Requires interactive `yes/no` confirmation:
+```bash
+# WARNING: overwrites all branches, tags, and releases in target
 vcopy myorg/myrepo target-org --force
 ```
 
-**What `--force` does:**
-- Detects the target repo already exists
-- Displays a warning explaining the risks
-- Asks for explicit `yes/no` confirmation before proceeding
-- Only proceeds if the user types `yes` or `y`
-
-> ⚠️ **WARNING**: A mirror push to an existing repository will **permanently delete** any branches, tags, or commits in the target that do not exist in the source. This cannot be undone.
+> ⚠️ **WARNING**: `--force` will **permanently delete** any branches, tags, or commits in the target that do not exist in the source. This cannot be undone.
 
 ## Hidden Refs (refs/pull/*)
 

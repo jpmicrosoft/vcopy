@@ -25,6 +25,7 @@ targetToken  string
 publicSource bool
 lfs          bool
 force        bool
+codeOnly     bool
 copyIssues   bool
 copyPRs      bool
 copyWiki     bool
@@ -66,6 +67,7 @@ f.StringVar(&targetToken, "target-token", "", "PAT for target (if auth-method=pa
 f.BoolVar(&publicSource, "public", false, "Source repo is public (skip source authentication)")
 f.BoolVar(&lfs, "lfs", false, "Include Git LFS objects in copy")
 f.BoolVar(&force, "force", false, "Force push to existing target repo (WARNING: overwrites all branches/tags)")
+f.BoolVar(&codeOnly, "code-only", false, "Copy source code only (branches/commits, no tags, releases, or metadata)")
 f.BoolVar(&copyIssues, "issues", false, "Copy issues")
 f.BoolVar(&copyPRs, "pull-requests", false, "Copy pull requests")
 f.BoolVar(&copyWiki, "wiki", false, "Copy wiki")
@@ -171,7 +173,7 @@ return err
 if !verifyOnly {
 fmt.Printf("Creating target repository %s/%s on %s...\n", targetOrg, repoName, targetHost)
 
-// Check if target repo already exists — mirror push is destructive
+// Check if target repo already exists
 exists, existErr := tgtClient.RepoExists(targetOrg, repoName)
 if existErr != nil {
 if !force {
@@ -180,18 +182,14 @@ return fmt.Errorf("cannot verify if target repo exists: %w\n  Use --force to byp
 fmt.Printf("  Warning: could not check if target repo exists: %v\n", existErr)
 fmt.Println("  Proceeding because --force was specified.")
 }
+
+forceOverwrite := false
 if exists {
-if !force {
-return fmt.Errorf("target repository %s/%s already exists on %s\n"+
-"  WARNING: --force is required to push to an existing repo.\n"+
-"  A mirror push OVERWRITES all branches, tags, and history in the target.\n"+
-"  Any work in the target that does not exist in the source WILL BE LOST.\n"+
-"  Re-run with --force if you understand the risks", targetOrg, repoName, targetHost)
-}
-// --force provided, but still require explicit confirmation
+if force {
+// --force: destructive mirror push (overwrites everything)
 fmt.Println()
 fmt.Printf("  ⚠️  WARNING: Target repository %s/%s already exists on %s.\n", targetOrg, repoName, targetHost)
-fmt.Println("  A mirror push will OVERWRITE all branches, tags, and history in the target.")
+fmt.Println("  --force mode: a mirror push will OVERWRITE all branches, tags, and history.")
 fmt.Println("  Any content in the target that does not exist in the source WILL BE PERMANENTLY LOST.")
 fmt.Println()
 if !confirmAction("Do you want to continue and overwrite the existing repository?") {
@@ -199,6 +197,11 @@ fmt.Println("Aborted.")
 return nil
 }
 fmt.Println()
+forceOverwrite = true
+} else {
+// Default: additive push (preserves existing tags and releases)
+fmt.Printf("  Repository %s/%s already exists. Using additive mode (existing tags and releases preserved).\n", targetOrg, repoName)
+}
 } else {
 if err := tgtClient.CreateRepo(targetOrg, repoName, verbose); err != nil {
 return fmt.Errorf("failed to create target repo: %w", err)
@@ -206,8 +209,25 @@ return fmt.Errorf("failed to create target repo: %w", err)
 }
 
 fmt.Printf("Mirroring %s/%s from %s to %s/%s on %s...\n", srcOwner, srcName, sourceHost, targetOrg, repoName, targetHost)
-if err := vcopy.MirrorRepo(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, lfs, verbose); err != nil {
+if err := vcopy.MirrorRepo(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, lfs, forceOverwrite, codeOnly, verbose); err != nil {
 return fmt.Errorf("mirror failed: %w", err)
+}
+
+// Auto-sync releases and tags (unless --code-only)
+if !codeOnly {
+if exists && !forceOverwrite {
+fmt.Println("Syncing new releases to target (existing releases preserved)...")
+if err := vcopy.SyncReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+fmt.Printf("Warning: release sync failed: %v\n", err)
+}
+} else {
+fmt.Println("Copying releases...")
+if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+fmt.Printf("Warning: release copy failed: %v\n", err)
+}
+}
+} else if verbose {
+fmt.Println("  Skipping tags and releases (--code-only mode)")
 }
 
 if copyIssues {
@@ -228,12 +248,6 @@ if err := vcopy.CopyWiki(sourceHost, srcOwner, srcName, targetHost, targetOrg, r
 fmt.Printf("Warning: wiki copy failed (wiki may not exist): %v\n", err)
 }
 }
-if copyReleases {
-fmt.Println("Copying releases...")
-if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-return fmt.Errorf("release copy failed: %w", err)
-}
-}
 }
 
 if !skipVerify {
@@ -245,6 +259,7 @@ results, err = verify.RunIncremental(sourceHost, srcOwner, srcName, targetHost, 
 } else {
 opts := verify.Options{
 QuickMode: quickVerify,
+CodeOnly:  codeOnly,
 Verbose:   verbose,
 }
 results, err = verify.RunAll(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, opts)
@@ -304,6 +319,7 @@ targetToken = cfg.Auth.TargetToken
 if !publicSource { publicSource = cfg.Source.Public }
 if !lfs { lfs = cfg.LFS }
 if !force { force = cfg.Force }
+if !codeOnly { codeOnly = cfg.CodeOnly }
 if !copyIssues { copyIssues = cfg.Copy.Issues }
 if !copyPRs { copyPRs = cfg.Copy.PullRequests }
 if !copyWiki { copyWiki = cfg.Copy.Wiki }

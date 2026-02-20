@@ -8,14 +8,50 @@ import (
 	ghclient "github.com/jpmicrosoft/vcopy/internal/github"
 )
 
-// CopyReleases migrates releases and their assets from source to target.
+// CopyReleases migrates all releases and their assets from source to target.
 func CopyReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRepo string, verbose bool) error {
+	return syncReleases(src, tgt, srcOwner, srcRepo, tgtOwner, tgtRepo, verbose, false)
+}
+
+// SyncReleases copies only releases that don't already exist in the target.
+// Existing releases in the target are preserved.
+func SyncReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRepo string, verbose bool) error {
+	return syncReleases(src, tgt, srcOwner, srcRepo, tgtOwner, tgtRepo, verbose, true)
+}
+
+func syncReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRepo string, verbose, incrementalOnly bool) error {
 	releases, err := src.ListReleases(srcOwner, srcRepo)
 	if err != nil {
 		return fmt.Errorf("failed to list source releases: %w", err)
 	}
 
+	// When incremental, build a set of existing target releases to skip
+	existingTags := make(map[string]bool)
+	if incrementalOnly {
+		tgtReleases, err := tgt.ListReleases(tgtOwner, tgtRepo)
+		if err != nil {
+			if verbose {
+				fmt.Printf("  Warning: could not list target releases: %v\n", err)
+			}
+		} else {
+			for _, r := range tgtReleases {
+				existingTags[r.GetTagName()] = true
+			}
+			if verbose {
+				fmt.Printf("  Found %d existing releases in target, will skip those\n", len(existingTags))
+			}
+		}
+	}
+
+	var copied int
 	for _, rel := range releases {
+		if incrementalOnly && existingTags[rel.GetTagName()] {
+			if verbose {
+				fmt.Printf("  Skipping existing release: %s\n", rel.GetTagName())
+			}
+			continue
+		}
+
 		if verbose {
 			fmt.Printf("  Copying release: %s\n", rel.GetTagName())
 		}
@@ -31,7 +67,10 @@ func CopyReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRep
 
 		created, err := tgt.CreateRelease(tgtOwner, tgtRepo, newRelease)
 		if err != nil {
-			return fmt.Errorf("failed to create release %s: %w", rel.GetTagName(), err)
+			if verbose {
+				fmt.Printf("  Warning: failed to create release %s: %v\n", rel.GetTagName(), err)
+			}
+			continue
 		}
 
 		// Copy release assets
@@ -57,7 +96,7 @@ func CopyReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRep
 			}
 
 			uploadFile, uploadErr := ghclient.NewUploadFile(resp.Body, asset.GetName(), int64(asset.GetSize()))
-			resp.Body.Close() // safe: NewUploadFile fully copies body to temp file before returning
+			resp.Body.Close()
 			if uploadErr != nil {
 				if verbose {
 					fmt.Printf("    Warning: failed to prepare asset %s for upload: %v\n", asset.GetName(), uploadErr)
@@ -73,9 +112,14 @@ func CopyReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRep
 			}
 			uploadFile.Cleanup()
 		}
+		copied++
 	}
 
-	fmt.Printf("  Copied %d releases\n", len(releases))
+	if incrementalOnly {
+		fmt.Printf("  Synced %d new releases (%d already existed)\n", copied, len(existingTags))
+	} else {
+		fmt.Printf("  Copied %d releases\n", copied)
+	}
 	return nil
 }
 
