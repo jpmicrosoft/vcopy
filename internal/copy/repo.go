@@ -13,8 +13,10 @@ import (
 	"github.com/jaiperez/vcopy/internal/retry"
 )
 
-// MirrorRepo performs a bare clone from source and mirror push to target.
-func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, lfs, verbose bool) error {
+// MirrorRepo performs a bare clone from source and pushes to target.
+// forceOverwrite: uses --mirror (destructive). codeOnly: pushes only branches (no tags).
+// Default (both false): pushes branches + new tags (additive).
+func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, lfs, forceOverwrite, codeOnly, verbose bool) error {
 	srcURL := ghclient.CloneURL(srcHost, srcOwner, srcName, srcToken)
 	tgtURL := ghclient.CloneURL(tgtHost, tgtOrg, tgtName, tgtToken)
 
@@ -63,14 +65,44 @@ func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 		}
 	}
 
-	// Mirror push to target
+	// Push to target
 	sp = progress.Start(fmt.Sprintf("Pushing to %s/%s/%s...", tgtHost, tgtOrg, tgtName))
-	pushErr := retry.Do(retry.Default(), "git push", func() error {
-		return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--mirror", tgtURL)
-	})
-	if pushErr != nil {
-		sp.StopFail()
-		return fmt.Errorf("mirror push failed: %w", pushErr)
+	if forceOverwrite {
+		// Destructive: replace everything in target
+		pushErr := retry.Do(retry.Default(), "git push", func() error {
+			return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--mirror", tgtURL)
+		})
+		if pushErr != nil {
+			sp.StopFail()
+			return fmt.Errorf("mirror push failed: %w", pushErr)
+		}
+	} else if codeOnly {
+		// Code only: push branches, skip tags entirely
+		pushErr := retry.Do(retry.Default(), "git push", func() error {
+			return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--all", tgtURL)
+		})
+		if pushErr != nil {
+			sp.StopFail()
+			return fmt.Errorf("push branches failed: %w", pushErr)
+		}
+	} else {
+		// Additive: push branches + new tags (existing tags preserved)
+		pushErr := retry.Do(retry.Default(), "git push", func() error {
+			return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--all", tgtURL)
+		})
+		if pushErr != nil {
+			sp.StopFail()
+			return fmt.Errorf("push branches failed: %w", pushErr)
+		}
+		// Push tags without overwriting existing ones
+		tagErr := retry.Do(retry.Default(), "git push tags", func() error {
+			return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--tags", tgtURL)
+		})
+		if tagErr != nil {
+			// git push --tags returns non-zero if ANY tag is rejected (e.g. already exists).
+			// This is expected for existing repos. Always warn so the user knows.
+			fmt.Println("  ⚠ Some tags could not be pushed (they may already exist in the target)")
+		}
 	}
 	sp.Stop()
 
