@@ -55,7 +55,7 @@ with comprehensive integrity verification to ensure the copy has not been tamper
 
 It performs a bare mirror clone of all branches, tags, and history, then runs a
 5-layer verification suite: object hashes, ref comparison, tree hashes, commit
-signatures, and bundle SHA-256 checksums.`,
+signatures, and git bundle integrity.`,
 Args: cobra.RangeArgs(0, 2),
 RunE: run,
 }
@@ -166,8 +166,14 @@ return fmt.Errorf("authentication failed: %w", err)
 }
 }
 
-srcClient := ghclient.NewClient(sourceHost, srcToken)
-tgtClient := ghclient.NewClient(targetHost, tgtToken)
+srcClient, err := ghclient.NewClient(sourceHost, srcToken)
+if err != nil {
+	return fmt.Errorf("failed to create source client: %w", err)
+}
+tgtClient, err := ghclient.NewClient(targetHost, tgtToken)
+if err != nil {
+	return fmt.Errorf("failed to create target client: %w", err)
+}
 
 srcOwner, srcName, err := parseRepo(sourceRepo)
 if err != nil {
@@ -269,14 +275,14 @@ if !skipVerify {
 fmt.Println("\n=== Running Integrity Verification ===")
 
 var results *verify.VerificationReport
-if since != "" {
-results, err = verify.RunIncremental(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, since, verbose)
-} else {
 opts := verify.Options{
 QuickMode: quickVerify,
 CodeOnly:  codeOnly,
 Verbose:   verbose,
 }
+if since != "" {
+results, err = verify.RunIncremental(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, since, opts)
+} else {
 results, err = verify.RunAll(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, opts)
 }
 if err != nil {
