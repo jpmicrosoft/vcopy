@@ -15,6 +15,9 @@ ghclient "github.com/jaiperez/vcopy/internal/github"
 "github.com/spf13/cobra"
 )
 
+// version is set at build time via -ldflags "-X main.version=..."
+var version = "dev"
+
 var (
 sourceHost   string
 targetHost   string
@@ -44,7 +47,8 @@ nonInteractive bool
 
 func main() {
 rootCmd := &cobra.Command{
-Use:   "vcopy <source-repo> <target-org>",
+Use:     "vcopy <source-repo> <target-org>",
+	Version: version,
 Short: "Verified GitHub repository copy tool",
 Long: `vcopy copies a GitHub repository to a target organization (Cloud or Enterprise)
 with comprehensive integrity verification to ensure the copy has not been tampered with.

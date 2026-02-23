@@ -227,7 +227,7 @@ Creates a `git bundle` from each repo (a self-contained archive of all refs and 
 | `--target-token` | | Personal Access Token for the target instance (avoids interactive prompt) |
 | `--public` | `false` | Source repo is publicly accessible — skips source authentication entirely, only target credentials needed |
 | `--lfs` | `false` | Include Git Large File Storage objects in the copy (requires `git-lfs` installed) |
-| `--force` | `false` | Destructive mirror push to an existing target repo — overwrites all branches, tags, and releases. Requires interactive `yes/no` confirmation |
+| `--force` | `false` | Destructive mirror push to an existing target repo — overwrites all branches, tags, and releases. Requires `yes/no` confirmation unless `--non-interactive` is set |
 | `--code-only` | `false` | Copy only branches and commits — skips tags, releases, and all metadata. Verification skips tag-dependent checks |
 | `--issues` | `false` | Also migrate issues (titles, bodies, labels, comments) from source to target |
 | `--pull-requests` | `false` | Also migrate pull requests as issues in the target (GitHub API does not support creating true PRs) |
@@ -258,7 +258,7 @@ Creates a `git bundle` from each repo (a self-contained archive of all refs and 
 - **Private by default**: Target repositories are created as private.
 - **Input validation on `--since`**: The `--since` value is validated to prevent git flag injection; only hex SHAs and date strings are accepted.
 - **Path traversal protection**: Repository names are sanitized (`filepath.Base` + `..` removal) before use in temp directory paths to prevent directory escape.
-- **SSRF protection**: Release asset downloads validate URL scheme (https only) and use a timeout-limited HTTP client.
+- **SSRF protection**: Release asset downloads validate URL scheme (https only), block private/internal network addresses (localhost, 10.x, 192.168.x, 169.254.x), and use a timeout-limited HTTP client.
 - **Attestation uses proper GPG detached signatures**: Signing produces an armored detached signature; verification uses separate temp files for signature and data, matching GPG's expected `--verify <sig-file> <data-file>` protocol.
 - **Nil-safe metadata migration**: Issue, PR, and comment formatting guards against nil user pointers (deleted/ghost GitHub accounts) to prevent panics during metadata copy.
 
@@ -282,7 +282,7 @@ When the target repository already exists, vcopy uses **additive mode** by defau
 vcopy myorg/myrepo target-org
 ```
 
-**Destructive mode** (`--force`): uses `git push --mirror` which replaces everything. Requires interactive `yes/no` confirmation:
+**Destructive mode** (`--force`): uses `git push --mirror` which replaces everything. Requires `yes/no` confirmation (skipped with `--non-interactive` or in the GitHub Action):
 ```bash
 # WARNING: overwrites all branches, tags, and releases in target
 vcopy myorg/myrepo target-org --force
@@ -388,7 +388,7 @@ verify:
   quick: true
 
 lfs: true
-force: false     # Destructive mirror push (requires confirmation)
+force: false     # Destructive mirror push (prompts unless non_interactive is true)
 code_only: false # Copy only branches/commits (no tags or releases)
 
 report:
