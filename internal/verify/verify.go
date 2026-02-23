@@ -140,7 +140,7 @@ func RunAll(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtT
 }
 
 // RunIncremental runs verification only on objects newer than the given reference.
-func RunIncremental(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, since string, verbose bool) (*VerificationReport, error) {
+func RunIncremental(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, since string, opts Options) (*VerificationReport, error) {
 	report := &VerificationReport{
 		SourceRepo: fmt.Sprintf("%s/%s", srcOwner, srcName),
 		TargetRepo: fmt.Sprintf("%s/%s", tgtOrg, tgtName),
@@ -149,24 +149,32 @@ func RunIncremental(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcTok
 		Timestamp:  time.Now().UTC(),
 	}
 
-	// Always do ref comparison (fast)
-	sp := progress.Start("Verifying: Ref Comparison")
-	refsResult, err := VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, verbose)
-	if err != nil {
-		sp.StopFail()
-		report.Checks = append(report.Checks, CheckResult{Name: "Ref Comparison", Status: StatusFail, Details: err.Error()})
+	// Ref comparison (skip in code-only mode since tags won't match)
+	if opts.CodeOnly {
+		report.Checks = append(report.Checks, CheckResult{
+			Name:    "Ref Comparison",
+			Status:  StatusSkip,
+			Details: "Skipped (code-only mode)",
+		})
 	} else {
-		if refsResult.Status == StatusFail {
+		sp := progress.Start("Verifying: Ref Comparison")
+		refsResult, err := VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, opts.Verbose)
+		if err != nil {
 			sp.StopFail()
+			report.Checks = append(report.Checks, CheckResult{Name: "Ref Comparison", Status: StatusFail, Details: err.Error()})
 		} else {
-			sp.Stop()
+			if refsResult.Status == StatusFail {
+				sp.StopFail()
+			} else {
+				sp.Stop()
+			}
+			report.Checks = append(report.Checks, *refsResult)
 		}
-		report.Checks = append(report.Checks, *refsResult)
 	}
 
 	// Incremental object verification
-	sp = progress.Start(fmt.Sprintf("Verifying: Objects since %s", since))
-	objResult, err := VerifyObjectsSince(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, since, verbose)
+	sp := progress.Start(fmt.Sprintf("Verifying: Objects since %s", since))
+	objResult, err := VerifyObjectsSince(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, since, opts.Verbose)
 	if err != nil {
 		sp.StopFail()
 		report.Checks = append(report.Checks, CheckResult{Name: "Incremental Objects", Status: StatusFail, Details: err.Error()})
@@ -181,7 +189,7 @@ func RunIncremental(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcTok
 
 	// Tree comparison (always)
 	sp = progress.Start("Verifying: Tree Hashes")
-	treeResult, err := VerifyTrees(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, verbose)
+	treeResult, err := VerifyTrees(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, opts.Verbose)
 	if err != nil {
 		sp.StopFail()
 		report.Checks = append(report.Checks, CheckResult{Name: "Tree Hashes", Status: StatusFail, Details: err.Error()})

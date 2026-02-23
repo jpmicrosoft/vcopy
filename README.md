@@ -208,7 +208,7 @@ Clones both repos bare, then runs `git rev-list --objects --all` to enumerate ev
 For each branch head, computes `git rev-parse <branch>^{tree}` on both repos. The tree hash is a recursive hash of the entire directory structure at that branch tip — file names, permissions, and content hashes. If the tree hashes match, the working directories are byte-for-byte identical.
 
 ### 4. Commit Signature Verification
-Runs `git log --show-signature` on both repos to enumerate all GPG/SSH-signed commits. Compares the set of signed commit SHAs to ensure no signatures were dropped or corrupted during the mirror. Reports as a warning (not failure) if signatures differ, since some transfer methods may strip them.
+Uses `git log --all --format=%H %G?` on both repos to enumerate all commits and their signature status (Good, Bad, None, etc.). Compares the set of signed commit SHAs to ensure no signatures were dropped or corrupted during the mirror. Reports as a warning (not failure) if signatures differ, since some transfer methods may strip them.
 
 ### 5. Bundle Integrity Verification
 Creates a `git bundle` from each repo (a self-contained archive of all refs and objects). Verifies each bundle passes `git bundle verify` (structural integrity). Then compares the refs listed inside each bundle using `git bundle list-heads` to confirm they match. SHA-256 checksums of each bundle file are included in the report for audit purposes, but are not compared directly because git bundle packing is non-deterministic.

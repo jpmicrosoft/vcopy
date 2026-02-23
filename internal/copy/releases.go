@@ -2,7 +2,6 @@ package copy
 
 import (
 	"fmt"
-	"io"
 
 	gh "github.com/google/go-github/v58/github"
 	ghclient "github.com/jaiperez/vcopy/internal/github"
@@ -158,6 +157,3 @@ func syncReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRep
 	}
 	return nil
 }
-
-// ensure io is used
-var _ = io.EOF

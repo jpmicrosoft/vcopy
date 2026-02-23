@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,7 +21,7 @@ type Client struct {
 }
 
 // NewClient creates a GitHub API client for the given host and token.
-func NewClient(host, token string) *Client {
+func NewClient(host, token string) (*Client, error) {
 	ctx := context.Background()
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	httpClient := oauth2.NewClient(ctx, ts)
@@ -34,8 +35,7 @@ func NewClient(host, token string) *Client {
 		var err error
 		client, err = gh.NewClient(httpClient).WithEnterpriseURLs(baseURL, uploadURL)
 		if err != nil {
-			// Fall back to cloud client if enterprise URL fails
-			client = gh.NewClient(httpClient)
+			return nil, fmt.Errorf("invalid Enterprise URL for host %s: %w", host, err)
 		}
 	}
 
@@ -43,7 +43,7 @@ func NewClient(host, token string) *Client {
 		API:  client,
 		Host: host,
 		ctx:  ctx,
-	}
+	}, nil
 }
 
 // RepoExists checks whether a repository exists and is accessible.
@@ -235,10 +235,12 @@ func (c *Client) DownloadReleaseAsset(owner, repo string, assetID int64) (*http.
 		}
 		// Block private/internal hostnames
 		host := parsedURL.Hostname()
-		if host == "localhost" || host == "127.0.0.1" || host == "::1" ||
-			strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "192.168.") ||
-			strings.HasPrefix(host, "169.254.") || strings.HasPrefix(host, "172.") {
-			return nil, fmt.Errorf("redirect to private network blocked for asset %d", assetID)
+		if ip := net.ParseIP(host); ip != nil {
+			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+				return nil, fmt.Errorf("redirect to private/internal network blocked for asset %d", assetID)
+			}
+		} else if host == "localhost" {
+			return nil, fmt.Errorf("redirect to localhost blocked for asset %d", assetID)
 		}
 		client := &http.Client{Timeout: 10 * time.Minute}
 		resp, err := client.Get(redirectURL)
