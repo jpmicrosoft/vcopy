@@ -37,8 +37,9 @@ since        string
 reportPath   string
 signKey      string
 configPath   string
-verbose      bool
-dryRun       bool
+verbose        bool
+dryRun         bool
+nonInteractive bool
 )
 
 func main() {
@@ -79,6 +80,7 @@ f.StringVar(&reportPath, "report", "", "Path to write JSON verification report")
 f.StringVar(&signKey, "sign", "", "GPG key ID to sign the verification report (Attestation Signature)")
 f.BoolVar(&verbose, "verbose", false, "Verbose output")
 f.BoolVar(&dryRun, "dry-run", false, "Show what would be done without making changes")
+	f.BoolVar(&nonInteractive, "non-interactive", false, "Skip confirmation prompts (for CI/CD and automation)")
 
 if err := rootCmd.Execute(); err != nil {
 os.Exit(1)
@@ -190,7 +192,7 @@ fmt.Printf("  ⚠️  WARNING: Target repository %s/%s already exists on %s.\n",
 fmt.Println("  --force mode: a mirror push will OVERWRITE all branches, tags, and history.")
 fmt.Println("  Any content in the target that does not exist in the source WILL BE PERMANENTLY LOST.")
 fmt.Println()
-if !confirmAction("Do you want to continue and overwrite the existing repository?") {
+if !nonInteractive && !confirmAction("Do you want to continue and overwrite the existing repository?") {
 fmt.Println("Aborted.")
 return nil
 }
@@ -340,6 +342,7 @@ if since == "" { since = cfg.Verify.Since }
 if reportPath == "" && cfg.Report.Path != "" { reportPath = cfg.Report.Path }
 if signKey == "" && cfg.Report.SignKey != "" { signKey = cfg.Report.SignKey }
 if !verbose { verbose = cfg.Verbose }
+	if !nonInteractive { nonInteractive = cfg.NonInteractive }
 }
 
 func parseRepo(repo string) (owner, name string, err error) {

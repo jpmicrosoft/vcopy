@@ -241,6 +241,7 @@ Creates a `git bundle` from each repo (a self-contained archive of all refs and 
 | `--sign` | | GPG key ID to sign the verification report for tamper-proof audit trails (requires `gpg` installed) |
 | `--verbose` | `false` | Show detailed output for every step (git commands, API calls, skipped items) |
 | `--dry-run` | `false` | Show what would happen without actually copying or modifying anything |
+| `--non-interactive` | `false` | Skip confirmation prompts — required for CI/CD and automation (the GitHub Action sets this automatically) |
 
 ## Requirements
 
@@ -405,3 +406,28 @@ vcopy automatically retries failed git operations and API calls with exponential
 - **Max wait**: 30 seconds
 
 This handles transient network failures and GitHub API rate limits gracefully.
+
+## GitHub Action
+
+vcopy is also available as a reusable GitHub Action. Clone this repo into your organization, create a release, and use it directly in your workflows.
+
+### Quick Start
+
+```yaml
+- uses: your-org/vcopy@v1
+  with:
+    source-repo: source-org/my-repo
+    target-org: target-org
+    source-token: ${{ secrets.SOURCE_GITHUB_TOKEN }}
+    target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
+```
+
+### Setup
+
+1. **Clone this repo** into your organization
+2. **Create a release** — push a version tag (`git tag v1.0.0 && git push origin v1.0.0`) to trigger the release workflow, which builds cross-platform binaries and publishes them
+3. **Reference the action** from any workflow in your org: `uses: your-org/vcopy@v1`
+
+All CLI flags are available as action inputs (`force`, `code-only`, `lfs`, `all-metadata`, etc.). The action runs in `--non-interactive` mode automatically.
+
+For full documentation, inputs/outputs reference, and example workflows, see **[action/README.md](action/README.md)**.

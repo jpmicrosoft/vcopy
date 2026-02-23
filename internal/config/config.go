@@ -15,10 +15,11 @@ type Config struct {
 	Copy     CopyConfig     `yaml:"copy"`
 	Verify   VerifyConfig   `yaml:"verify"`
 	Report   ReportConfig   `yaml:"report"`
-	LFS      bool           `yaml:"lfs"`
-	Force    bool           `yaml:"force"`
-	CodeOnly bool           `yaml:"code_only"`
-	Verbose  bool           `yaml:"verbose"`
+	LFS            bool           `yaml:"lfs"`
+	Force          bool           `yaml:"force"`
+	CodeOnly       bool           `yaml:"code_only"`
+	NonInteractive bool           `yaml:"non_interactive"`
+	Verbose        bool           `yaml:"verbose"`
 }
 
 // SourceConfig holds source repository settings.

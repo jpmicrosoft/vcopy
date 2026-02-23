@@ -24,6 +24,7 @@ verify:
 lfs: true
 force: false     # Set to true to do destructive mirror push (still prompts for confirmation)
 code_only: false # Set to true to copy only branches/commits (no tags, releases, or metadata)
+non_interactive: false # Set to true to skip confirmation prompts (for CI/CD)
 verbose: false
 
 report:
