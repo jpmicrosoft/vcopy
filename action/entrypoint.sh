@@ -29,16 +29,23 @@ BINARY_NAME="vcopy-${OS}-${ARCH}${EXT}"
 echo "Platform: ${OS}/${ARCH} → ${BINARY_NAME}"
 
 # ──────────────────────────────────────────────
-# 2. Determine which repo to download from
+# 2. Validate inputs
 # ──────────────────────────────────────────────
-# github.action_repository is the repo where the action lives (supports forks)
+VERSION="${INPUT_VERSION}"
+if [ "${VERSION}" != "latest" ]; then
+  if ! echo "${VERSION}" | grep -qE '^v[0-9]+(\.[0-9]+)*(-[a-zA-Z0-9._]+)?$'; then
+    echo "::error::Invalid version format '${VERSION}'. Expected 'latest' or semver like 'v1.0.0'."
+    exit 1
+  fi
+fi
+
+# github.action_repository is the repo where the action lives (supports clones/forks)
 ACTION_REPO="${GITHUB_ACTION_REPOSITORY:-${GITHUB_REPOSITORY}}"
 echo "Action repository: ${ACTION_REPO}"
 
 # ──────────────────────────────────────────────
 # 3. Download vcopy binary from GitHub Releases
 # ──────────────────────────────────────────────
-VERSION="${INPUT_VERSION}"
 INSTALL_DIR="${RUNNER_TEMP}/vcopy"
 mkdir -p "${INSTALL_DIR}"
 
@@ -70,7 +77,7 @@ fi
 
 echo "Downloading: ${ASSET_URL}"
 
-# For private repos, we need to use the API URL with Accept header for the asset
+# For private repos, use the API URL with Accept header for the asset
 ASSET_ID=$(echo "${RELEASE_JSON}" | grep -B5 "${BINARY_NAME}" | grep -o '"id":[[:space:]]*[0-9]*' | head -1 | grep -o '[0-9]*')
 ASSET_API_URL="https://api.github.com/repos/${ACTION_REPO}/releases/assets/${ASSET_ID}"
 
@@ -83,13 +90,45 @@ curl -sSfL \
   exit 1
 }
 
-chmod +x "${INSTALL_DIR}/vcopy${EXT}"
+# ──────────────────────────────────────────────
+# 4. Verify binary integrity via checksums
+# ──────────────────────────────────────────────
+CHECKSUM_ID=$(echo "${RELEASE_JSON}" | grep -B5 "checksums.txt" | grep -o '"id":[[:space:]]*[0-9]*' | head -1 | grep -o '[0-9]*' || true)
+
+if [ -n "${CHECKSUM_ID}" ]; then
+  CHECKSUM_API_URL="https://api.github.com/repos/${ACTION_REPO}/releases/assets/${CHECKSUM_ID}"
+  curl -sSfL \
+    -H "Authorization: token ${GH_TOKEN}" \
+    -H "Accept: application/octet-stream" \
+    "${CHECKSUM_API_URL}" \
+    -o "${INSTALL_DIR}/checksums.txt" || {
+    echo "::warning::Could not download checksums.txt — skipping integrity check."
+  }
+
+  if [ -f "${INSTALL_DIR}/checksums.txt" ]; then
+    EXPECTED=$(grep "${BINARY_NAME}" "${INSTALL_DIR}/checksums.txt" | awk '{print $1}')
+    ACTUAL=$(sha256sum "${INSTALL_DIR}/vcopy${EXT}" | awk '{print $1}')
+    if [ "${EXPECTED}" != "${ACTUAL}" ]; then
+      echo "::error::Checksum mismatch! Expected ${EXPECTED}, got ${ACTUAL}. Binary may be corrupted or tampered with."
+      rm -f "${INSTALL_DIR}/vcopy${EXT}"
+      exit 1
+    fi
+    echo "✓ Binary checksum verified: ${ACTUAL}"
+  fi
+else
+  echo "::warning::No checksums.txt found in release — skipping integrity check."
+fi
+
+chmod +x "${INSTALL_DIR}/vcopy${EXT}" || {
+  echo "::error::Failed to make binary executable."
+  exit 1
+}
 echo "vcopy installed to: ${INSTALL_DIR}/vcopy${EXT}"
 
 VCOPY="${INSTALL_DIR}/vcopy${EXT}"
 
 # ──────────────────────────────────────────────
-# 4. Build CLI arguments from action inputs
+# 5. Build CLI arguments from action inputs
 # ──────────────────────────────────────────────
 ARGS=()
 
@@ -127,10 +166,10 @@ ARGS+=("--non-interactive")
 [ "${INPUT_VERBOSE}" = "true" ] && ARGS+=("--verbose")
 
 # ──────────────────────────────────────────────
-# 5. Run vcopy
+# 6. Run vcopy (tokens are masked by GitHub Actions automatically)
 # ──────────────────────────────────────────────
 echo "::group::vcopy output"
-echo "Running: vcopy ${ARGS[*]/%TOKEN*/[REDACTED]}"
+echo "Running: vcopy [args redacted for security]"
 
 EXIT_CODE=0
 "${VCOPY}" "${ARGS[@]}" || EXIT_CODE=$?
@@ -138,7 +177,7 @@ EXIT_CODE=0
 echo "::endgroup::"
 
 # ──────────────────────────────────────────────
-# 6. Set outputs
+# 7. Set outputs
 # ──────────────────────────────────────────────
 if [ "${INPUT_SKIP_VERIFY}" = "true" ]; then
   echo "verification_status=skipped" >> "${GITHUB_OUTPUT}"

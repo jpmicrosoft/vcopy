@@ -4,6 +4,33 @@ import (
 	"testing"
 )
 
+func TestSanitizeRepoName(t *testing.T) {
+	tests := []struct {
+		name string
+		input string
+		want string
+	}{
+		{"normal name", "my-repo", "my-repo"},
+		{"path traversal", "../../../etc/passwd", "passwd"},
+		{"double dots only", "..", "repo"},
+		{"dot only", ".", "repo"},
+		{"empty string", "", "repo"},
+		{"slashes stripped", "foo/bar/baz", "baz"},
+		{"embedded double dots", "my..repo", "myrepo"},
+		{"backslash path", `foo\bar\baz`, "baz"},
+		{"name with extension", "repo.git", "repo.git"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeRepoName(tt.input)
+			if got != tt.want {
+				t.Errorf("sanitizeRepoName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSanitizeOutput(t *testing.T) {
 	tests := []struct {
 		name     string

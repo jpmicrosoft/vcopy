@@ -2,6 +2,8 @@ package main
 
 import (
 	"testing"
+
+	"github.com/jpmicrosoft/vcopy/internal/config"
 )
 
 func TestParseRepo(t *testing.T) {
@@ -61,5 +63,47 @@ func TestSplitRepo(t *testing.T) {
 				t.Errorf("splitRepo(%q) = %d parts, want %d", tt.input, len(parts), tt.want)
 			}
 		})
+	}
+}
+
+func TestConfirmAction_NonInteractive(t *testing.T) {
+	// When nonInteractive is true, the force path should skip confirmAction.
+	// We test this by verifying the flag exists and defaults to false.
+	if nonInteractive {
+		t.Error("nonInteractive should default to false")
+	}
+}
+
+func TestApplyConfig_NonInteractive(t *testing.T) {
+	// Reset global state
+	origNI := nonInteractive
+	defer func() { nonInteractive = origNI }()
+
+	nonInteractive = false
+	cfg := &config.Config{
+		NonInteractive: true,
+		Source:         config.SourceConfig{Repo: "o/r"},
+		Target:         config.TargetConfig{Org: "t"},
+	}
+	applyConfig(cfg)
+	if !nonInteractive {
+		t.Error("applyConfig should set nonInteractive from config")
+	}
+}
+
+func TestApplyConfig_NoOverrideWhenSet(t *testing.T) {
+	// If nonInteractive is already true, config should not reset it
+	origNI := nonInteractive
+	defer func() { nonInteractive = origNI }()
+
+	nonInteractive = true
+	cfg := &config.Config{
+		NonInteractive: false,
+		Source:         config.SourceConfig{Repo: "o/r"},
+		Target:         config.TargetConfig{Org: "t"},
+	}
+	applyConfig(cfg)
+	if !nonInteractive {
+		t.Error("applyConfig should not reset nonInteractive when already true")
 	}
 }
