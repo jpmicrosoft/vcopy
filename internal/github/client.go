@@ -230,8 +230,15 @@ func (c *Client) DownloadReleaseAsset(owner, repo string, assetID int64) (*http.
 	if redirectURL != "" {
 		// Validate redirect URL to prevent SSRF
 		parsedURL, err := url.Parse(redirectURL)
-		if err != nil || (parsedURL.Scheme != "https" && parsedURL.Scheme != "http") {
-			return nil, fmt.Errorf("invalid redirect URL for asset %d", assetID)
+		if err != nil || parsedURL.Scheme != "https" {
+			return nil, fmt.Errorf("invalid or non-HTTPS redirect URL for asset %d", assetID)
+		}
+		// Block private/internal hostnames
+		host := parsedURL.Hostname()
+		if host == "localhost" || host == "127.0.0.1" || host == "::1" ||
+			strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "192.168.") ||
+			strings.HasPrefix(host, "169.254.") || strings.HasPrefix(host, "172.") {
+			return nil, fmt.Errorf("redirect to private network blocked for asset %d", assetID)
 		}
 		client := &http.Client{Timeout: 10 * time.Minute}
 		resp, err := client.Get(redirectURL)

@@ -163,7 +163,7 @@ jobs:
           target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
 ```
 
-> ⚠️ **Warning**: `force: true` performs a destructive mirror push. All branches, tags, and releases in the target that don't exist in the source will be permanently deleted.
+> ⚠️ **Warning**: `force: true` performs a destructive mirror push **without confirmation** (the action runs in non-interactive mode). All branches, tags, and releases in the target that don't exist in the source will be permanently deleted.
 
 ### Verify only (no copy)
 
