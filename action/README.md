@@ -85,6 +85,8 @@ This triggers `.github/workflows/release.yml`, which:
 | `sign` | | | GPG key ID to sign the report |
 | `verbose` | | `false` | Show detailed output |
 | `version` | | `latest` | vcopy release version (e.g., `v1.0.0`) |
+| `upload-report` | | `false` | Upload the verification report as a workflow artifact |
+| `artifact-name` | | `vcopy-verification-report` | Name for the uploaded artifact (used with `upload-report`) |
 
 ## Outputs
 
@@ -189,15 +191,17 @@ jobs:
           target-org: target-org
           all-metadata: true
           report: audit.json
+          upload-report: true
           verbose: true
           source-token: ${{ secrets.SOURCE_GITHUB_TOKEN }}
           target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
+```
 
-      - name: Upload report
-        uses: actions/upload-artifact@v4
-        with:
-          name: vcopy-audit-report
-          path: audit.json
+The report is automatically uploaded as a workflow artifact named `vcopy-verification-report`. You can customize the name:
+
+```yaml
+          upload-report: true
+          artifact-name: my-repo-audit-2025
 ```
 
 ### Scheduled sync
