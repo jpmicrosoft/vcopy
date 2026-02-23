@@ -1,0 +1,139 @@
+name: 'vcopy — Verified GitHub Repository Copy'
+description: 'Copy a GitHub repository to a target organization (Cloud or Enterprise) with 5-layer integrity verification.'
+author: 'JP'
+
+branding:
+  icon: 'copy'
+  color: 'blue'
+
+inputs:
+  source-repo:
+    description: 'Source repository in owner/repo format (e.g., myorg/myrepo)'
+    required: true
+  target-org:
+    description: 'Target organization or user account to copy the repo into'
+    required: true
+  source-host:
+    description: 'Source GitHub hostname'
+    required: false
+    default: 'github.com'
+  target-host:
+    description: 'Target GitHub hostname (use your Enterprise hostname for on-prem)'
+    required: false
+    default: 'github.com'
+  target-name:
+    description: 'Target repository name (defaults to same as source)'
+    required: false
+    default: ''
+  source-token:
+    description: 'Personal Access Token for the source GitHub instance'
+    required: false
+    default: ''
+  target-token:
+    description: 'Personal Access Token for the target GitHub instance'
+    required: true
+  public:
+    description: 'Source repo is public — skip source authentication'
+    required: false
+    default: 'false'
+  lfs:
+    description: 'Include Git LFS objects in copy'
+    required: false
+    default: 'false'
+  force:
+    description: 'Destructive mirror push to existing target (overwrites everything)'
+    required: false
+    default: 'false'
+  code-only:
+    description: 'Copy only branches/commits (no tags, releases, or metadata)'
+    required: false
+    default: 'false'
+  issues:
+    description: 'Also copy issues from source to target'
+    required: false
+    default: 'false'
+  pull-requests:
+    description: 'Also copy pull requests (as issues) from source to target'
+    required: false
+    default: 'false'
+  wiki:
+    description: 'Also copy the repository wiki'
+    required: false
+    default: 'false'
+  all-metadata:
+    description: 'Copy all metadata (issues, PRs, wiki)'
+    required: false
+    default: 'false'
+  verify-only:
+    description: 'Only run verification — do not copy anything'
+    required: false
+    default: 'false'
+  skip-verify:
+    description: 'Skip verification after copy'
+    required: false
+    default: 'false'
+  quick-verify:
+    description: 'Quick verification (refs + tree hashes only)'
+    required: false
+    default: 'false'
+  since:
+    description: 'Incremental verify — only check objects after this SHA or date'
+    required: false
+    default: ''
+  report:
+    description: 'File path to write JSON verification report'
+    required: false
+    default: ''
+  sign:
+    description: 'GPG key ID to sign the verification report'
+    required: false
+    default: ''
+  verbose:
+    description: 'Show detailed output for every step'
+    required: false
+    default: 'false'
+  version:
+    description: 'vcopy release version to use (e.g., v1.0.0). Defaults to latest.'
+    required: false
+    default: 'latest'
+
+outputs:
+  verification-status:
+    description: 'Verification result: pass, fail, or skipped'
+    value: ${{ steps.run-vcopy.outputs.verification_status }}
+  report-path:
+    description: 'Path to the JSON verification report (if --report was used)'
+    value: ${{ steps.run-vcopy.outputs.report_path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Download and run vcopy
+      id: run-vcopy
+      shell: bash
+      env:
+        INPUT_SOURCE_REPO: ${{ inputs.source-repo }}
+        INPUT_TARGET_ORG: ${{ inputs.target-org }}
+        INPUT_SOURCE_HOST: ${{ inputs.source-host }}
+        INPUT_TARGET_HOST: ${{ inputs.target-host }}
+        INPUT_TARGET_NAME: ${{ inputs.target-name }}
+        INPUT_SOURCE_TOKEN: ${{ inputs.source-token }}
+        INPUT_TARGET_TOKEN: ${{ inputs.target-token }}
+        INPUT_PUBLIC: ${{ inputs.public }}
+        INPUT_LFS: ${{ inputs.lfs }}
+        INPUT_FORCE: ${{ inputs.force }}
+        INPUT_CODE_ONLY: ${{ inputs.code-only }}
+        INPUT_ISSUES: ${{ inputs.issues }}
+        INPUT_PULL_REQUESTS: ${{ inputs.pull-requests }}
+        INPUT_WIKI: ${{ inputs.wiki }}
+        INPUT_ALL_METADATA: ${{ inputs.all-metadata }}
+        INPUT_VERIFY_ONLY: ${{ inputs.verify-only }}
+        INPUT_SKIP_VERIFY: ${{ inputs.skip-verify }}
+        INPUT_QUICK_VERIFY: ${{ inputs.quick-verify }}
+        INPUT_SINCE: ${{ inputs.since }}
+        INPUT_REPORT: ${{ inputs.report }}
+        INPUT_SIGN: ${{ inputs.sign }}
+        INPUT_VERBOSE: ${{ inputs.verbose }}
+        INPUT_VERSION: ${{ inputs.version }}
+        GH_TOKEN: ${{ github.token }}
+      run: ${{ github.action_path }}/action/entrypoint.sh
