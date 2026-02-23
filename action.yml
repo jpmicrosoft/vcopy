@@ -96,6 +96,14 @@ inputs:
     description: 'vcopy release version to use (e.g., v1.0.0). Defaults to latest.'
     required: false
     default: 'latest'
+  upload-report:
+    description: 'Upload the verification report as a workflow artifact'
+    required: false
+    default: 'false'
+  artifact-name:
+    description: 'Name for the uploaded artifact (used with upload-report)'
+    required: false
+    default: 'vcopy-verification-report'
 
 outputs:
   verification-status:
@@ -137,3 +145,11 @@ runs:
         INPUT_VERSION: ${{ inputs.version }}
         GH_TOKEN: ${{ github.token }}
       run: ${{ github.action_path }}/action/entrypoint.sh
+
+    - name: Upload verification report
+      if: inputs.upload-report == 'true' && inputs.report != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.report }}
+        if-no-files-found: warn
