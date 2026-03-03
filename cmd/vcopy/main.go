@@ -93,8 +93,10 @@ os.Exit(1)
 
 func run(cmd *cobra.Command, args []string) error {
 // Load config file if provided
+var cfg *config.Config
 if configPath != "" {
-cfg, err := config.Load(configPath)
+var err error
+cfg, err = config.Load(configPath)
 if err != nil {
 return fmt.Errorf("config error: %w", err)
 }
@@ -106,13 +108,9 @@ var sourceRepo, targetOrg string
 if len(args) >= 2 {
 sourceRepo = args[0]
 targetOrg = args[1]
-} else if configPath != "" {
-cfgArgs, err := config.Load(configPath)
-if err != nil {
-return fmt.Errorf("config error on re-read: %w", err)
-}
-sourceRepo = cfgArgs.Source.Repo
-targetOrg = cfgArgs.Target.Org
+} else if cfg != nil {
+sourceRepo = cfg.Source.Repo
+targetOrg = cfg.Target.Org
 } else {
 return fmt.Errorf("requires 2 arguments: <source-repo> <target-org> (or use --config)")
 }

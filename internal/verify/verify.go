@@ -65,8 +65,7 @@ func (r *VerificationReport) AllPassed() bool {
 // Options controls which verification checks to run.
 type Options struct {
 	QuickMode bool
-	CodeOnly  bool   // skip tag-dependent checks (ref comparison, bundle)
-	Since     string // SHA or date for incremental verification
+	CodeOnly  bool // skip tag-dependent checks (ref comparison, bundle)
 	Verbose   bool
 }
 
@@ -92,11 +91,11 @@ func RunAll(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtT
 	}
 
 	checks := []checkDef{
-		{"Ref Comparison", VerifyRefs, false, true},
-		{"Object Hashes", VerifyObjects, true, false},
-		{"Tree Hashes", VerifyTrees, false, false},
-		{"Commit Signatures", VerifySignatures, true, false},
-		{"Bundle Integrity", VerifyBundle, true, true},
+		{"Branch/Tag Ref Comparison", VerifyRefs, false, true},
+		{"Git Object Hash Verification", VerifyObjects, true, false},
+		{"Tree Hash Comparison", VerifyTrees, false, false},
+		{"Commit Signature Verification", VerifySignatures, true, false},
+		{"Bundle Integrity Verification", VerifyBundle, true, true},
 	}
 
 	for _, check := range checks {
