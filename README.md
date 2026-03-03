@@ -218,6 +218,7 @@ Creates a `git bundle` from each repo (a self-contained archive of all refs and 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-h`, `--help` | | Show help and usage information |
+| `-v`, `--version` | | Show vcopy version |
 | `--config` | | Path to a YAML config file for repeatable setups (see [Config File](#config-file)) |
 | `--source-host` | `github.com` | Hostname of the source GitHub instance (e.g., `github.mycompany.com` for Enterprise) |
 | `--target-host` | `github.com` | Hostname of the target GitHub instance |

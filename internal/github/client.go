@@ -223,9 +223,18 @@ func (c *Client) DeleteRelease(owner, repo string, releaseID int64) error {
 // DownloadReleaseAsset downloads a release asset and returns the HTTP response body.
 // Caller is responsible for closing the response body.
 func (c *Client) DownloadReleaseAsset(owner, repo string, assetID int64) (*http.Response, error) {
-	_, redirectURL, err := c.API.Repositories.DownloadReleaseAsset(c.ctx, owner, repo, assetID, http.DefaultClient)
+	// Pass nil to get the redirect URL without following it, so we can apply
+	// SSRF validation before making the actual download request.
+	rc, redirectURL, err := c.API.Repositories.DownloadReleaseAsset(c.ctx, owner, repo, assetID, nil)
 	if err != nil {
 		return nil, err
+	}
+	// If no redirect (content returned directly), wrap the ReadCloser in an http.Response
+	if redirectURL == "" && rc != nil {
+		return &http.Response{StatusCode: http.StatusOK, Body: rc}, nil
+	}
+	if rc != nil {
+		rc.Close()
 	}
 	if redirectURL != "" {
 		// Validate redirect URL to prevent SSRF
