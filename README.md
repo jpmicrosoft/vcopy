@@ -516,6 +516,12 @@ vcopy batch corp-org cloud-org --search "platform-" --source-host ghes.corp.com 
 
 # Add suffix to all target names
 vcopy batch source-org target-org --search "api-" --suffix "-imported"
+
+# Batch copy with combined report
+vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public --no-github --report batch-audit.json
+
+# Batch copy with combined + per-repo reports
+vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public --report batch-audit.json --per-repo-report
 ```
 
 ### Batch Flags
@@ -527,6 +533,8 @@ vcopy batch source-org target-org --search "api-" --suffix "-imported"
 | `--suffix` | | Suffix to append to each target repo name |
 | `--skip-existing` | `false` | Skip repos that already exist in the target org (useful for resuming interrupted batches) |
 | `--dry-run` | `false` | Preview the full source→target mapping without copying anything |
+| `--report` | | Path to write a combined JSON batch report with all repo results |
+| `--per-repo-report` | `false` | Also write individual JSON reports per repo (e.g., `report-reponame.json`) |
 
 All standard vcopy flags (`--public`, `--no-github`, `--skip-verify`, `--code-only`, etc.) are also available and apply to every repo in the batch.
 
@@ -548,6 +556,7 @@ Target repo names follow the pattern `{prefix}{source-name}{suffix}`:
 - **Progress**: Prints `[N/total] Copying repo-name...` for each repo
 - **Summary**: At the end, prints a report of succeeded/failed/skipped counts
 - **Resumable**: Use `--skip-existing` to skip repos already created (e.g., after a partial run)
+- **Reporting**: Use `--report` to write a combined JSON report; add `--per-repo-report` for individual files per repo
 
 ## Hidden Refs (refs/pull/*)
 

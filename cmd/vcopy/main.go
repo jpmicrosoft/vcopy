@@ -4,7 +4,9 @@ import (
 "bufio"
 "fmt"
 "os"
+"path/filepath"
 "strings"
+"time"
 
 "github.com/jpmicrosoft/vcopy/internal/auth"
 "github.com/jpmicrosoft/vcopy/internal/config"
@@ -46,10 +48,11 @@ noActions      bool
 noGitHub       bool
 excludePaths   []string
 // batch subcommand flags
-batchSearch    string
-batchPrefix    string
-batchSuffix    string
-batchSkipExist bool
+batchSearch       string
+batchPrefix       string
+batchSuffix       string
+batchSkipExist    bool
+batchPerRepoReport bool
 verbose        bool
 dryRun         bool
 nonInteractive bool
@@ -119,6 +122,8 @@ Example:
 	bf.StringVar(&batchPrefix, "prefix", "", "Prefix to prepend to each target repo name")
 	bf.StringVar(&batchSuffix, "suffix", "", "Suffix to append to each target repo name")
 	bf.BoolVar(&batchSkipExist, "skip-existing", false, "Skip repos that already exist in the target org (useful for resuming)")
+	bf.StringVar(&reportPath, "report", "", "Path to write combined JSON batch report")
+	bf.BoolVar(&batchPerRepoReport, "per-repo-report", false, "Also write individual JSON reports per repo (e.g., report-reponame.json)")
 	batchCmd.MarkFlagRequired("search")
 	// Shared flags inherited by batch
 	bf.StringVar(&sourceHost, "source-host", "github.com", "Source GitHub host")
@@ -538,6 +543,7 @@ func batchRun(cmd *cobra.Command, args []string) error {
 	// Execute batch
 	var succeeded, failed, skipped int
 	var failures []string
+	var repoResults []report.BatchRepoResult
 
 	for i, name := range repos {
 		targetRepoName := batchPrefix + name + batchSuffix
@@ -550,21 +556,79 @@ func batchRun(cmd *cobra.Command, args []string) error {
 			if exists {
 				fmt.Printf("%s Skipping %s (target %s/%s already exists)\n", prefix, name, targetOrg, targetRepoName)
 				skipped++
+				repoResults = append(repoResults, report.BatchRepoResult{
+					SourceRepo: sourceRepo,
+					TargetRepo: targetOrg + "/" + targetRepoName,
+					Status:     "skipped",
+				})
 				continue
 			}
 		}
 
 		fmt.Printf("\n%s Copying %s → %s/%s\n", prefix, sourceRepo, targetOrg, targetRepoName)
 
-		err := copyOneRepo(srcClient, tgtClient, sourceOrg, name, targetOrg, targetRepoName, srcToken, tgtToken, excludeList)
+		verifyResult, err := copyOneRepo(srcClient, tgtClient, sourceOrg, name, targetOrg, targetRepoName, srcToken, tgtToken, excludeList)
 		if err != nil {
 			fmt.Printf("%s ✗ FAILED: %v\n", prefix, err)
 			failed++
 			failures = append(failures, fmt.Sprintf("%s: %v", sourceRepo, err))
+			entry := report.BatchRepoResult{
+				SourceRepo: sourceRepo,
+				TargetRepo: targetOrg + "/" + targetRepoName,
+				Status:     "failed",
+				Error:      err.Error(),
+			}
+			if verifyResult != nil {
+				entry.Checks = verifyResult.Checks
+			}
+			repoResults = append(repoResults, entry)
 			continue
 		}
 		fmt.Printf("%s ✓ Done\n", prefix)
 		succeeded++
+		entry := report.BatchRepoResult{
+			SourceRepo: sourceRepo,
+			TargetRepo: targetOrg + "/" + targetRepoName,
+			Status:     "succeeded",
+		}
+		if verifyResult != nil {
+			entry.Checks = verifyResult.Checks
+		}
+		repoResults = append(repoResults, entry)
+
+		// Write per-repo report if requested
+		if batchPerRepoReport && reportPath != "" && verifyResult != nil {
+			perRepoPath := strings.TrimSuffix(reportPath, filepath.Ext(reportPath)) + "-" + name + ".json"
+			if err := report.WriteJSON(verifyResult, perRepoPath); err != nil {
+				fmt.Printf("  Warning: failed to write per-repo report: %v\n", err)
+			} else {
+				fmt.Printf("  Per-repo report: %s\n", perRepoPath)
+			}
+		}
+	}
+
+	// Write combined batch report
+	if reportPath != "" {
+		batchReport := &report.BatchReport{
+			SourceOrg:    sourceOrg,
+			TargetOrg:    targetOrg,
+			SourceHost:   sourceHost,
+			TargetHost:   targetHost,
+			SearchFilter: batchSearch,
+			Timestamp:    time.Now().UTC(),
+			Summary: report.BatchSummary{
+				Total:     len(repos),
+				Succeeded: succeeded,
+				Failed:    failed,
+				Skipped:   skipped,
+			},
+			Repos: repoResults,
+		}
+		if err := report.WriteBatchJSON(batchReport, reportPath); err != nil {
+			fmt.Printf("Warning: failed to write batch report: %v\n", err)
+		} else {
+			fmt.Printf("\nBatch report written to: %s\n", reportPath)
+		}
 	}
 
 	// Summary
@@ -592,15 +656,16 @@ func batchRun(cmd *cobra.Command, args []string) error {
 
 // copyOneRepo copies a single repo from source to target, handling creation,
 // mirroring, releases, verification, and path exclusion.
-func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targetOrg, targetRepoName, srcToken, tgtToken string, excludeList []string) error {
+// Returns the verification report (nil if verification was skipped) and any error.
+func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targetOrg, targetRepoName, srcToken, tgtToken string, excludeList []string) (*verify.VerificationReport, error) {
 	// Create target repo
 	if err := tgtClient.CreateRepo(targetOrg, targetRepoName, verbose); err != nil {
-		return fmt.Errorf("create repo: %w", err)
+		return nil, fmt.Errorf("create repo: %w", err)
 	}
 
 	// Mirror
 	if err := vcopy.MirrorRepo(sourceHost, srcOwner, srcName, targetHost, targetOrg, targetRepoName, srcToken, tgtToken, lfs, false, codeOnly, verbose); err != nil {
-		return fmt.Errorf("mirror: %w", err)
+		return nil, fmt.Errorf("mirror: %w", err)
 	}
 
 	// Copy releases (unless code-only)
@@ -611,18 +676,20 @@ func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targe
 	}
 
 	// Verification
+	var results *verify.VerificationReport
 	if !skipVerify {
 		opts := verify.Options{
 			QuickMode: quickVerify,
 			CodeOnly:  codeOnly,
 			Verbose:   verbose,
 		}
-		results, err := verify.RunAll(sourceHost, srcOwner, srcName, targetHost, targetOrg, targetRepoName, srcToken, tgtToken, opts)
+		var err error
+		results, err = verify.RunAll(sourceHost, srcOwner, srcName, targetHost, targetOrg, targetRepoName, srcToken, tgtToken, opts)
 		if err != nil {
-			return fmt.Errorf("verification: %w", err)
+			return nil, fmt.Errorf("verification: %w", err)
 		}
 		if !results.AllPassed() {
-			return fmt.Errorf("verification FAILED")
+			return results, fmt.Errorf("verification FAILED")
 		}
 	}
 
@@ -633,5 +700,5 @@ func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targe
 		}
 	}
 
-	return nil
+	return results, nil
 }
