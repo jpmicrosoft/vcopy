@@ -1,12 +1,21 @@
-# vcopy — Verified GitHub Repository Copy Tool
+# vcopy — Verified GitHub Repository Copy
 
-A CLI tool that copies GitHub repositories between organizations (Cloud and Enterprise) with comprehensive integrity verification.
+[![CI](https://github.com/jpmicrosoft/vcopy/actions/workflows/ci.yml/badge.svg)](https://github.com/jpmicrosoft/vcopy/actions/workflows/ci.yml)
+[![Release](https://github.com/jpmicrosoft/vcopy/actions/workflows/release.yml/badge.svg)](https://github.com/jpmicrosoft/vcopy/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/jaiperez/vcopy)](https://goreportcard.com/report/github.com/jaiperez/vcopy)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+**Copy GitHub repositories between organizations — Cloud, Enterprise, or both — with 5-layer cryptographic integrity verification.**
+
+vcopy mirrors branches, tags, commits, releases, and optionally issues/PRs/wiki, then runs five independent checks to prove the copy is bit-for-bit identical to the source. Available as a **CLI tool** and a **GitHub Action**.
+
+---
 
 ## Quick Start
 
-**You need:** `git` in PATH, a token with `repo` scope on both source and target, and optionally the [`gh` CLI](https://cli.github.com/) for automatic token detection. To build from source you also need Go 1.21+.
+**Prerequisites:** `git` in PATH and a token with `repo` scope on both source and target. Optionally, the [`gh` CLI](https://cli.github.com/) for automatic token detection. Go 1.21+ to build from source.
 
-**Install:**
+### Install
 
 ```bash
 go install github.com/jaiperez/vcopy/cmd/vcopy@latest
@@ -14,15 +23,15 @@ go install github.com/jaiperez/vcopy/cmd/vcopy@latest
 
 Or download a pre-built binary from [Releases](https://github.com/jpmicrosoft/vcopy/releases).
 
-**Copy a repo:**
+### Copy a repo
 
 ```bash
 vcopy myorg/myrepo target-org
 ```
 
-That's it. vcopy will authenticate, create the target as private, mirror all branches/tags/history, sync releases, run 5-layer integrity verification, and print a pass/fail report.
+That's it. vcopy authenticates, creates the target as private, mirrors all branches/tags/history, syncs releases, runs 5-layer integrity verification, and prints a pass/fail report.
 
-**Common variations:**
+### Common variations
 
 ```bash
 # Copy to GitHub Enterprise
@@ -34,20 +43,20 @@ vcopy golang/go my-org --public
 # Code only — no tags, releases, or metadata
 vcopy myorg/myrepo target-org --code-only
 
-# Copy without source CI/CD workflows or Copilot config
+# Strip CI/CD and Copilot config from the target
 vcopy myorg/myrepo target-org --no-workflows --no-copilot
 
-# Provide tokens explicitly (for scripts/CI)
+# Explicit tokens for scripts and CI
 vcopy myorg/myrepo target-org --auth-method pat --source-token ghp_xxx --target-token ghp_yyy
 
-# Dry run — see what would happen without doing anything
+# Dry run — preview without making changes
 vcopy myorg/myrepo target-org --dry-run
 ```
 
-**As a GitHub Action:**
+### As a GitHub Action
 
 ```yaml
-- uses: your-org/vcopy@v1
+- uses: jpmicrosoft/vcopy@v1
   with:
     source-repo: source-org/my-repo
     target-org: target-org
@@ -55,51 +64,48 @@ vcopy myorg/myrepo target-org --dry-run
     target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
 ```
 
-See [GitHub Action docs](action/README.md) for full setup guide and examples.
+See the [Action documentation](action/README.md) for full setup and examples.
 
 ---
 
 ## Features
 
-- **Verified mirroring** of all branches, tags, and commit history
-- **Smart release sync**: tags and releases auto-sync; additive by default (preserves target-only content)
-- **Code-only mode**: `--code-only` to copy branches/commits without tags or releases
-- **Path exclusion**: `--no-workflows`, `--no-actions`, `--no-copilot`, `--no-github`, and `--exclude` to remove specific files/directories from the target
-- **Batch copy**: `vcopy batch` to copy multiple repos from a source org using search filters, with prefix/suffix naming and resumable runs
-- **5-layer integrity verification**:
-  1. Git object hash verification (every commit, tree, blob)
-  2. Branch/tag ref comparison
-  3. Root tree hash comparison per branch
-  4. GPG/SSH commit signature preservation check
-  5. Git bundle integrity verification
-- **Git LFS support**: `--lfs` flag to include LFS objects (auto-detects and warns if LFS is present)
-- **Flexible authentication**: auto-detects `gh` CLI tokens, falls back to PAT
-- **Metadata migration** (optional): issues, pull requests, wiki
-- **Quick verification**: `--quick-verify` for fast ref + tree hash checks only
-- **Incremental verification**: `--since` to verify only new objects since a date or SHA
-- **Skip verification**: `--skip-verify` for copy-only workflows (verify later with `--verify-only`)
-- **Attestation Signature**: `--sign` to GPG-sign the verification report for tamper-proof audit trails
-- **Config file**: `--config` for repeatable YAML-based configuration
-- **Retry with backoff**: automatic retry on transient network/API failures
-- **Progress indicators**: animated spinners for long-running operations
-- **Audit trail**: colored terminal report + optional JSON output
-- **Cross-platform**: single binary for Windows, macOS, Linux
+| Category | Capabilities |
+|----------|-------------|
+| **Mirroring** | All branches, tags, commit history, and releases. Additive by default (preserves target-only content). |
+| **Integrity** | 5-layer verification: object hashes, ref comparison, tree hashes, commit signatures, bundle integrity. |
+| **Batch copy** | `vcopy batch` discovers and copies multiple repos by search filter with prefix/suffix naming and resumable runs. |
+| **Path control** | `--no-workflows`, `--no-actions`, `--no-copilot`, `--no-github`, `--exclude` — strip org-specific files from the target. |
+| **Metadata** | Optionally migrate issues, pull requests (as issues), and wiki. |
+| **Verification modes** | `--quick-verify` (fast), `--since` (incremental), `--skip-verify` / `--verify-only` (deferred). |
+| **Attestation** | `--sign` GPG-signs the JSON verification report for tamper-proof audit trails. |
+| **Reporting** | JSON verification reports. In batch mode: combined report + optional per-repo reports. |
+| **LFS** | `--lfs` includes Git LFS objects (auto-detects and warns). |
+| **Auth** | Auto-detects `gh` CLI tokens, falls back to PAT. `--public` for open-source repos. |
+| **Resilience** | Automatic retry with exponential backoff on network/API failures. |
+| **Config** | YAML config file (`--config`) for repeatable setups. |
+| **Cross-platform** | Single binary for Windows, macOS, Linux (amd64 + arm64). |
+| **Action** | Reusable GitHub Action with all CLI capabilities. |
 
 ## Installation
 
-The Quick Start above covers `go install`. For other methods:
+### Pre-built binaries (recommended)
+
+Download the latest binary for your platform from [Releases](https://github.com/jpmicrosoft/vcopy/releases). Binaries are named by platform (e.g., `vcopy-windows-amd64.exe`, `vcopy-linux-arm64`). Rename to `vcopy` (`vcopy.exe` on Windows) for convenience, or run directly.
+
+### Build from source
 
 ```bash
-# Build from source
 git clone https://github.com/jpmicrosoft/vcopy.git
 cd vcopy
 go build -o vcopy ./cmd/vcopy
-
-# Cross-platform builds (Linux, macOS, Windows × amd64/arm64)
-make build-all   # outputs to bin/
 ```
 
-> **Note:** Pre-built binaries from [Releases](https://github.com/jpmicrosoft/vcopy/releases) are named by platform (e.g., `vcopy-windows-amd64.exe`, `vcopy-linux-arm64`). You can run them directly or rename to `vcopy` (`vcopy.exe` on Windows) so the examples in this README work as-is.
+### Cross-compile all platforms
+
+```bash
+make build-all   # outputs to bin/
+```
 
 ## Authentication
 
@@ -269,21 +275,21 @@ vcopy large-org/big-repo my-org --public --issues --source-token ghp_xxx
 
 The `--public` flag controls whether source auth is *required* — you can always optionally provide a `--source-token` alongside it for better rate limits on metadata operations.
 
-## What Gets Verified
+## Integrity Verification
 
-After copying a repository, vcopy runs **5 independent checks** to confirm nothing was lost or changed in transit. Think of it like a shipping manifest — every item is checked off:
+After copying, vcopy runs **5 independent checks** to cryptographically prove nothing was lost or altered in transit:
 
-| Check | What it answers | Analogy |
-|-------|----------------|---------|
-| **Ref Comparison** | Do all branches and tags exist and point to the same commits? | "Are all the shipping labels correct?" |
-| **Object Hashes** | Does every commit, file, and folder have the exact same content? | "Is every item in the box identical to the original?" |
-| **Tree Hashes** | Does each branch's directory structure and file contents match? | "Do the contents of each folder match?" |
-| **Commit Signatures** | Are GPG/SSH signatures on commits still intact? | "Are all the wax seals unbroken?" |
-| **Bundle Integrity** | Can both repos produce valid, equivalent git bundles? | "Can both warehouses produce identical inventories?" |
+| # | Check | What it proves |
+|---|-------|---------------|
+| 1 | **Ref Comparison** | Every branch and tag points to the same commit SHA |
+| 2 | **Object Hashes** | Every commit, file, and directory has identical content (SHA-based) |
+| 3 | **Tree Hashes** | Each branch's directory structure and file contents match byte-for-byte |
+| 4 | **Commit Signatures** | GPG/SSH signatures on commits survived the transfer |
+| 5 | **Bundle Integrity** | Both repos produce structurally valid, equivalent git bundles |
 
-If **all 5 pass**, you have cryptographic proof the copy is identical to the source. If any fail, the report tells you exactly what differs.
+**All 5 pass → cryptographic proof the copy is identical.** If any fail, the report tells you exactly what differs.
 
-> **Note**: In `--code-only` mode, Ref Comparison and Bundle Integrity are skipped because they depend on tags matching. The remaining 3 checks (Object Hashes, Tree Hashes, Commit Signatures) still run to verify branch integrity.
+> In `--code-only` mode, checks 1 and 5 are skipped (they depend on tags). The remaining 3 checks still verify branch integrity.
 
 ## Verification Technical Details
 
@@ -683,12 +689,12 @@ This handles transient network failures and GitHub API rate limits gracefully.
 
 ## GitHub Action
 
-vcopy is also available as a reusable GitHub Action. Clone this repo into your organization, create a release, and use it directly in your workflows.
+vcopy is available as a [reusable GitHub Action](https://github.com/marketplace) with all CLI capabilities. Use it directly in your workflows:
 
 ### Quick Start
 
 ```yaml
-- uses: your-org/vcopy@v1
+- uses: jpmicrosoft/vcopy@v1
   with:
     source-repo: source-org/my-repo
     target-org: target-org
@@ -698,11 +704,9 @@ vcopy is also available as a reusable GitHub Action. Clone this repo into your o
 
 ### Setup
 
-1. **Clone this repo** into your organization
-2. **Create a release** — push a version tag (`git tag v1.0.0 && git push origin v1.0.0`) to trigger the release workflow, which builds cross-platform binaries and publishes them
-3. **Reference the action** from any workflow in your org: `uses: your-org/vcopy@v1`
-
-All CLI flags are available as action inputs (`force`, `code-only`, `lfs`, `all-metadata`, etc.). The action runs in `--non-interactive` mode automatically.
+1. **Reference the action** from any workflow: `uses: jpmicrosoft/vcopy@v1`
+2. All CLI flags are available as action inputs (`force`, `code-only`, `lfs`, `all-metadata`, etc.)
+3. The action runs in `--non-interactive` mode automatically
 
 For full documentation, inputs/outputs reference, and example workflows, see **[action/README.md](action/README.md)**.
 
@@ -733,3 +737,13 @@ This is expected for any unsigned executable downloaded from the internet. Smart
   cd vcopy
   go build -o vcopy.exe ./cmd/vcopy
   ```
+
+---
+
+## Contributing
+
+Contributions are welcome! Please open an issue or pull request on [GitHub](https://github.com/jpmicrosoft/vcopy).
+
+## Author
+
+**JP** — [github.com/jpmicrosoft](https://github.com/jpmicrosoft)
