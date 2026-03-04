@@ -64,7 +64,8 @@ See [GitHub Action docs](action/README.md) for full setup guide and examples.
 - **Verified mirroring** of all branches, tags, and commit history
 - **Smart release sync**: tags and releases auto-sync; additive by default (preserves target-only content)
 - **Code-only mode**: `--code-only` to copy branches/commits without tags or releases
-- **Path exclusion**: `--no-workflows`, `--no-copilot`, and `--exclude` to remove specific files/directories from the target
+- **Path exclusion**: `--no-workflows`, `--no-actions`, `--no-copilot`, `--no-github`, and `--exclude` to remove specific files/directories from the target
+- **Batch copy**: `vcopy batch` to copy multiple repos from a source org using search filters, with prefix/suffix naming and resumable runs
 - **5-layer integrity verification**:
   1. Git object hash verification (every commit, tree, blob)
   2. Branch/tag ref comparison
@@ -472,6 +473,79 @@ exclude:
     - docs/internal
     - scripts/deploy.sh
 ```
+
+## Batch Copy
+
+Copy multiple repositories from a source org to a target org in a single command. Repos are discovered automatically via GitHub API search.
+
+### Usage
+
+```bash
+vcopy batch <source-org> <target-org> --search "<name-filter>" [flags]
+```
+
+### Azure Terraform AVM Example
+
+```bash
+# Preview all Azure Terraform AVM modules (dry-run)
+vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public --no-github --dry-run
+
+# Copy all AVM modules (resource + pattern)
+vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public --no-github --skip-verify
+
+# Copy only AVM resource modules
+vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-res-" --public --no-github
+
+# Copy with a prefix on target names
+vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --prefix "avm-" --public --no-github
+
+# Resume an interrupted batch
+vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --skip-existing --public --no-github
+```
+
+### Generic Examples
+
+```bash
+# Copy all repos matching "service-" from any org
+vcopy batch mycompany backup-org --search "service-" --skip-verify
+
+# Cross-host batch (Enterprise to Cloud)
+vcopy batch corp-org cloud-org --search "platform-" --source-host ghes.corp.com --target-host github.com
+
+# Add suffix to all target names
+vcopy batch source-org target-org --search "api-" --suffix "-imported"
+```
+
+### Batch Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--search` | *(required)* | Repository name filter (matched against repo names in source org) |
+| `--prefix` | | Prefix to prepend to each target repo name |
+| `--suffix` | | Suffix to append to each target repo name |
+| `--skip-existing` | `false` | Skip repos that already exist in the target org (useful for resuming interrupted batches) |
+| `--dry-run` | `false` | Preview the full source→target mapping without copying anything |
+
+All standard vcopy flags (`--public`, `--no-github`, `--skip-verify`, `--code-only`, etc.) are also available and apply to every repo in the batch.
+
+### Target Naming
+
+Target repo names follow the pattern `{prefix}{source-name}{suffix}`:
+
+| Source Name | Prefix | Suffix | Target Name |
+|-------------|--------|--------|-------------|
+| `terraform-azurerm-avm-res-cache-redis` | | | `terraform-azurerm-avm-res-cache-redis` |
+| `terraform-azurerm-avm-res-cache-redis` | `avm-` | | `avm-terraform-azurerm-avm-res-cache-redis` |
+| `terraform-azurerm-avm-res-cache-redis` | | `-internal` | `terraform-azurerm-avm-res-cache-redis-internal` |
+| `my-service` | `imported-` | `-v2` | `imported-my-service-v2` |
+
+### Behavior
+
+- **Sequential execution**: Repos are copied one at a time (rate-limit friendly)
+- **Error handling**: If one repo fails, the batch skips it and continues to the next
+- **Progress**: Prints `[N/total] Copying repo-name...` for each repo
+- **Summary**: At the end, prints a report of succeeded/failed/skipped counts
+- **Resumable**: Use `--skip-existing` to skip repos already created (e.g., after a partial run)
 
 ## Hidden Refs (refs/pull/*)
 

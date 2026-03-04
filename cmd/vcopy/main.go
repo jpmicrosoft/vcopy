@@ -45,6 +45,11 @@ noCopilot      bool
 noActions      bool
 noGitHub       bool
 excludePaths   []string
+// batch subcommand flags
+batchSearch    string
+batchPrefix    string
+batchSuffix    string
+batchSkipExist bool
 verbose        bool
 dryRun         bool
 nonInteractive bool
@@ -95,6 +100,46 @@ f.BoolVar(&dryRun, "dry-run", false, "Show what would be done without making cha
 	f.BoolVar(&noCopilot, "no-copilot", false, "Exclude Copilot instructions and skills (.github/copilot-instructions.md, .github/copilot/) from the target")
 	f.BoolVar(&noGitHub, "no-github", false, "Exclude entire .github/ directory from the target (supersedes --no-workflows, --no-actions, --no-copilot)")
 	f.StringSliceVar(&excludePaths, "exclude", nil, "Additional paths to exclude from the target (comma-separated or repeated)")
+
+	// Batch subcommand
+	batchCmd := &cobra.Command{
+		Use:   "batch <source-org> <target-org>",
+		Short: "Batch copy repos matching a search filter from source org to target org",
+		Long: `Discover repositories in the source organization matching a name filter,
+then copy each one to the target organization. Supports prefix/suffix renaming,
+skip-existing for resumable runs, and all standard vcopy flags.
+
+Example:
+  vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public --no-github --dry-run`,
+		Args: cobra.ExactArgs(2),
+		RunE: batchRun,
+	}
+	bf := batchCmd.Flags()
+	bf.StringVar(&batchSearch, "search", "", "Repository name filter (required, matched against repo name)")
+	bf.StringVar(&batchPrefix, "prefix", "", "Prefix to prepend to each target repo name")
+	bf.StringVar(&batchSuffix, "suffix", "", "Suffix to append to each target repo name")
+	bf.BoolVar(&batchSkipExist, "skip-existing", false, "Skip repos that already exist in the target org (useful for resuming)")
+	batchCmd.MarkFlagRequired("search")
+	// Shared flags inherited by batch
+	bf.StringVar(&sourceHost, "source-host", "github.com", "Source GitHub host")
+	bf.StringVar(&targetHost, "target-host", "github.com", "Target GitHub host")
+	bf.StringVar(&authMethod, "auth-method", "auto", "Auth method: auto, gh, pat")
+	bf.StringVar(&sourceToken, "source-token", "", "PAT for source (if auth-method=pat)")
+	bf.StringVar(&targetToken, "target-token", "", "PAT for target (if auth-method=pat)")
+	bf.BoolVar(&publicSource, "public", false, "Source repos are public (skip source authentication)")
+	bf.BoolVar(&lfs, "lfs", false, "Include Git LFS objects in copy")
+	bf.BoolVar(&codeOnly, "code-only", false, "Copy source code only (branches/commits, no tags, releases, or metadata)")
+	bf.BoolVar(&skipVerify, "skip-verify", false, "Skip verification (copy only)")
+	bf.BoolVar(&quickVerify, "quick-verify", false, "Quick verification (refs + tree hashes only)")
+	bf.BoolVar(&verbose, "verbose", false, "Verbose output")
+	bf.BoolVar(&dryRun, "dry-run", false, "Show what would be done without making changes")
+	bf.BoolVar(&nonInteractive, "non-interactive", false, "Skip confirmation prompts")
+	bf.BoolVar(&noWorkflows, "no-workflows", false, "Exclude GitHub Actions workflows (.github/workflows/) from target")
+	bf.BoolVar(&noActions, "no-actions", false, "Exclude GitHub Actions custom actions (.github/actions/) from target")
+	bf.BoolVar(&noCopilot, "no-copilot", false, "Exclude Copilot instructions/skills from target")
+	bf.BoolVar(&noGitHub, "no-github", false, "Exclude entire .github/ directory from target")
+	bf.StringSliceVar(&excludePaths, "exclude", nil, "Additional paths to exclude from target")
+	rootCmd.AddCommand(batchCmd)
 
 if err := rootCmd.Execute(); err != nil {
 os.Exit(1)
@@ -417,4 +462,176 @@ return false
 }
 answer = strings.TrimSpace(strings.ToLower(answer))
 return answer == "yes" || answer == "y"
+}
+
+// batchRun implements the `vcopy batch` subcommand.
+func batchRun(cmd *cobra.Command, args []string) error {
+	sourceOrg := args[0]
+	targetOrg := args[1]
+
+	// Authenticate
+	var srcToken, tgtToken string
+	var err error
+	if publicSource {
+		fmt.Println("Public source mode: skipping source authentication")
+		tgtToken, err = auth.AuthenticateTarget(authMethod, targetHost, targetToken)
+		if err != nil {
+			return fmt.Errorf("target authentication failed: %w", err)
+		}
+	} else {
+		srcToken, tgtToken, err = auth.Authenticate(authMethod, sourceHost, targetHost, sourceToken, targetToken)
+		if err != nil {
+			return fmt.Errorf("authentication failed: %w", err)
+		}
+	}
+
+	// Build a client for search (use source token for auth, or unauthenticated for public)
+	searchClient, err := ghclient.NewClient(sourceHost, srcToken)
+	if err != nil {
+		return fmt.Errorf("failed to create source client: %w", err)
+	}
+
+	fmt.Printf("Searching for repos matching %q in %s...\n", batchSearch, sourceOrg)
+	repos, err := searchClient.SearchRepos(sourceOrg, batchSearch)
+	if err != nil {
+		return fmt.Errorf("repo search failed: %w", err)
+	}
+	if len(repos) == 0 {
+		fmt.Println("No repositories found matching the search filter.")
+		return nil
+	}
+	fmt.Printf("Found %d repositories\n\n", len(repos))
+
+	// Dry run: just print the mapping
+	if dryRun {
+		fmt.Println("=== DRY RUN — Batch Copy Plan ===")
+		fmt.Printf("Source org:  %s (%s)\n", sourceOrg, sourceHost)
+		fmt.Printf("Target org:  %s (%s)\n", targetOrg, targetHost)
+		fmt.Printf("Name format: %s{name}%s\n", batchPrefix, batchSuffix)
+		fmt.Printf("Flags:       no-github=%v, no-workflows=%v, no-actions=%v, no-copilot=%v, skip-verify=%v, code-only=%v\n",
+			noGitHub, noWorkflows, noActions, noCopilot, skipVerify, codeOnly)
+		fmt.Println()
+		for i, name := range repos {
+			targetRepoName := batchPrefix + name + batchSuffix
+			fmt.Printf("  [%d/%d] %s/%s → %s/%s\n", i+1, len(repos), sourceOrg, name, targetOrg, targetRepoName)
+		}
+		fmt.Printf("\nTotal: %d repositories would be copied.\n", len(repos))
+		return nil
+	}
+
+	// Build shared clients and exclude list
+	tgtClient, err := ghclient.NewClient(targetHost, tgtToken)
+	if err != nil {
+		return fmt.Errorf("failed to create target client: %w", err)
+	}
+
+	excludeList, err := vcopy.BuildExcludePaths(noWorkflows, noActions, noCopilot, noGitHub, excludePaths)
+	if err != nil {
+		return fmt.Errorf("invalid exclude paths: %w", err)
+	}
+
+	srcClient, err := ghclient.NewClient(sourceHost, srcToken)
+	if err != nil {
+		return fmt.Errorf("failed to create source client: %w", err)
+	}
+
+	// Execute batch
+	var succeeded, failed, skipped int
+	var failures []string
+
+	for i, name := range repos {
+		targetRepoName := batchPrefix + name + batchSuffix
+		sourceRepo := sourceOrg + "/" + name
+		prefix := fmt.Sprintf("[%d/%d]", i+1, len(repos))
+
+		// Check if target already exists (skip-existing)
+		if batchSkipExist {
+			exists, _ := tgtClient.RepoExists(targetOrg, targetRepoName)
+			if exists {
+				fmt.Printf("%s Skipping %s (target %s/%s already exists)\n", prefix, name, targetOrg, targetRepoName)
+				skipped++
+				continue
+			}
+		}
+
+		fmt.Printf("\n%s Copying %s → %s/%s\n", prefix, sourceRepo, targetOrg, targetRepoName)
+
+		err := copyOneRepo(srcClient, tgtClient, sourceOrg, name, targetOrg, targetRepoName, srcToken, tgtToken, excludeList)
+		if err != nil {
+			fmt.Printf("%s ✗ FAILED: %v\n", prefix, err)
+			failed++
+			failures = append(failures, fmt.Sprintf("%s: %v", sourceRepo, err))
+			continue
+		}
+		fmt.Printf("%s ✓ Done\n", prefix)
+		succeeded++
+	}
+
+	// Summary
+	fmt.Println()
+	fmt.Println("╔══════════════════════════════════════════════════════╗")
+	fmt.Println("║            VCOPY BATCH SUMMARY                     ║")
+	fmt.Println("╚══════════════════════════════════════════════════════╝")
+	fmt.Printf("  Total:     %d repositories\n", len(repos))
+	fmt.Printf("  Succeeded: %d\n", succeeded)
+	fmt.Printf("  Failed:    %d\n", failed)
+	fmt.Printf("  Skipped:   %d\n", skipped)
+	if len(failures) > 0 {
+		fmt.Println("\n  Failures:")
+		for _, f := range failures {
+			fmt.Printf("    - %s\n", f)
+		}
+	}
+	fmt.Println()
+
+	if failed > 0 {
+		return fmt.Errorf("%d of %d repos failed to copy", failed, len(repos))
+	}
+	return nil
+}
+
+// copyOneRepo copies a single repo from source to target, handling creation,
+// mirroring, releases, verification, and path exclusion.
+func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targetOrg, targetRepoName, srcToken, tgtToken string, excludeList []string) error {
+	// Create target repo
+	if err := tgtClient.CreateRepo(targetOrg, targetRepoName, verbose); err != nil {
+		return fmt.Errorf("create repo: %w", err)
+	}
+
+	// Mirror
+	if err := vcopy.MirrorRepo(sourceHost, srcOwner, srcName, targetHost, targetOrg, targetRepoName, srcToken, tgtToken, lfs, false, codeOnly, verbose); err != nil {
+		return fmt.Errorf("mirror: %w", err)
+	}
+
+	// Copy releases (unless code-only)
+	if !codeOnly {
+		if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, targetRepoName, verbose); err != nil {
+			fmt.Printf("  Warning: release copy failed: %v\n", err)
+		}
+	}
+
+	// Verification
+	if !skipVerify {
+		opts := verify.Options{
+			QuickMode: quickVerify,
+			CodeOnly:  codeOnly,
+			Verbose:   verbose,
+		}
+		results, err := verify.RunAll(sourceHost, srcOwner, srcName, targetHost, targetOrg, targetRepoName, srcToken, tgtToken, opts)
+		if err != nil {
+			return fmt.Errorf("verification: %w", err)
+		}
+		if !results.AllPassed() {
+			return fmt.Errorf("verification FAILED")
+		}
+	}
+
+	// Exclude paths (post-verification)
+	if len(excludeList) > 0 {
+		if err := vcopy.CleanupExcludedPaths(targetHost, targetOrg, targetRepoName, tgtToken, excludeList, verbose); err != nil {
+			fmt.Printf("  Warning: exclude cleanup failed: %v\n", err)
+		}
+	}
+
+	return nil
 }
