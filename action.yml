@@ -105,7 +105,7 @@ inputs:
     required: false
     default: 'vcopy-verification-report'
   no-workflows:
-    description: 'Exclude GitHub Actions workflows (.github/workflows/) from the target'
+    description: 'Exclude GitHub Actions workflows and custom actions (.github/workflows/, .github/actions/) from the target'
     required: false
     default: 'false'
   no-copilot:

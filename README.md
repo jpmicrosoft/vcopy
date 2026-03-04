@@ -329,7 +329,7 @@ Creates a `git bundle` from each repo (a self-contained archive of all refs and 
 | `--verbose` | `false` | Show detailed output for every step (git commands, API calls, skipped items) |
 | `--dry-run` | `false` | Show what would happen without actually copying or modifying anything |
 | `--non-interactive` | `false` | Skip confirmation prompts — required for CI/CD and automation (the GitHub Action sets this automatically) |
-| `--no-workflows` | `false` | Exclude GitHub Actions workflows (`.github/workflows/`) from the target. A cleanup commit is added after push |
+| `--no-workflows` | `false` | Exclude GitHub Actions workflows and custom actions (`.github/workflows/`, `.github/actions/`) from the target |
 | `--no-copilot` | `false` | Exclude Copilot instructions and skills (`.github/copilot-instructions.md`, `.github/copilot/`) from the target |
 | `--exclude` | | Comma-separated list of additional paths to exclude from the target (e.g., `--exclude vendor,docs/internal`). Can be repeated |
 
@@ -380,11 +380,12 @@ You can exclude specific files and directories from the target repository after 
 
 ### Why exclude paths?
 
-| Scenario | Flag | What it removes |
-|----------|------|----------------|
-| Source has CI/CD workflows that reference secrets, environments, or deploy targets specific to the source org | `--no-workflows` | `.github/workflows/` (all workflow YAML files) |
-| Source has Copilot instructions or custom skills that are org-specific | `--no-copilot` | `.github/copilot-instructions.md` and `.github/copilot/` directory |
-| Source has vendored dependencies, internal docs, or other paths you don't want in the target | `--exclude` | Any paths you specify |
+| Scenario | How it's handled |
+|----------|-----------------|
+| Source has CI/CD workflows and custom actions that reference secrets, environments, or deploy targets specific to the source org | Use `--no-workflows` — removes `.github/workflows/` and `.github/actions/` |
+| Source has Copilot instructions or custom skills that are org-specific | Use `--no-copilot` — removes `.github/copilot-instructions.md` and `.github/copilot/` |
+| Source has vendored dependencies, internal docs, or other paths you don't want in the target | Use `--exclude` — removes any paths you specify |
+| Source has CODEOWNERS that reference teams/users from the source org | **Automatic** — `CODEOWNERS`, `.github/CODEOWNERS`, and `docs/CODEOWNERS` are always removed because they reference teams and users that won't exist in the target org. This prevents broken branch protection rules and review assignment failures |
 
 ### How it works (step by step)
 
@@ -393,7 +394,7 @@ Path exclusion is a **post-verification operation**. Here's exactly what happens
 1. **vcopy mirrors the full repository** — all branches, tags, commits, and history are pushed to the target (this is the standard copy step, identical to running without exclusion flags)
 2. **Verification runs** — the 5-layer integrity check compares source and target to confirm the mirror is exact. This happens **before** any paths are removed, so verification compares the 1:1 mirror
 3. **vcopy shallow-clones the target** — a `--depth 1` clone of the target's default branch is made to a temp directory
-4. **Excluded paths are deleted** — `git rm -rf` removes the specified files/directories from the working tree
+4. **Excluded paths are deleted** — `git rm -rf` removes the specified files/directories from the working tree. CODEOWNERS files are always included in this step.
 5. **A cleanup commit is pushed** — a single commit with the message `vcopy: remove excluded paths` is pushed to the target's default branch. The commit message lists every path that was removed
 6. **Temp directory is cleaned up** — all temporary files are deleted
 
@@ -402,7 +403,9 @@ Source Repo            Mirror + Verify              Target Repo (final)
 ┌────────────────┐     ┌────────────────┐           ┌────────────────┐
 │ .github/       │────▶│ .github/       │ ✅ PASS   │ (removed)      │
 │   workflows/   │     │   workflows/   │──verify──▶│                │
+│   actions/     │     │   actions/     │           │                │
 │   copilot/     │     │   copilot/     │           │                │
+│   CODEOWNERS   │     │   CODEOWNERS   │           │                │
 │ src/           │────▶│ src/           │           │ src/           │
 │ README.md      │────▶│ README.md      │           │ README.md      │
 │ All history    │────▶│ All history    │           │ All history +  │
@@ -419,13 +422,15 @@ Source Repo            Mirror + Verify              Target Repo (final)
 - **The cleanup is transparent** — anyone looking at the target repo can see exactly what was removed by inspecting the `vcopy: remove excluded paths` commit
 - **Excluded paths exist in history** — the files are removed from the current tree, but they still exist in older commits. If you need them scrubbed from history entirely, you'd need a separate tool like `git filter-repo`
 - **Non-existent paths are skipped** — if a path doesn't exist in the source (e.g., the repo has no `.github/workflows/`), the flag is silently ignored
+- **CODEOWNERS is always removed** — on every copy, `CODEOWNERS` files are removed from all standard locations (`CODEOWNERS`, `.github/CODEOWNERS`, `docs/CODEOWNERS`) because they reference source org teams and users that won't exist in the target
 
 ### Preset flags
 
 | Flag | Paths removed | Use case |
 |------|--------------|----------|
-| `--no-workflows` | `.github/workflows/` | Source CI/CD shouldn't run in target org |
+| `--no-workflows` | `.github/workflows/`, `.github/actions/` | Source CI/CD and custom actions shouldn't run in target org |
 | `--no-copilot` | `.github/copilot-instructions.md`, `.github/copilot/` | Copilot config is org-specific |
+| *(always)* | `CODEOWNERS`, `.github/CODEOWNERS`, `docs/CODEOWNERS` | Source team/user references would break branch protection in target |
 
 ### Custom paths with `--exclude`
 
