@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -16,7 +17,8 @@ import (
 // sanitizeRepoName strips path separators and traversal sequences from a repo name
 // to prevent path traversal when used in file paths.
 func sanitizeRepoName(name string) string {
-	name = filepath.Base(name)
+	name = strings.ReplaceAll(name, "\\", "/") // normalise before extracting base
+	name = path.Base(name)
 	name = strings.ReplaceAll(name, "..", "")
 	if name == "" || name == "." {
 		name = "repo"
