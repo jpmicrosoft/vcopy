@@ -99,6 +99,8 @@ go build -o vcopy ./cmd/vcopy
 make build-all   # outputs to bin/
 ```
 
+> **Note:** Pre-built binaries from [Releases](https://github.com/jpmicrosoft/vcopy/releases) are named by platform (e.g., `vcopy-windows-amd64.exe`, `vcopy-linux-arm64`). You can run them directly or rename to `vcopy` (`vcopy.exe` on Windows) so the examples in this README work as-is.
+
 ## Authentication
 
 vcopy supports three authentication methods:
@@ -694,3 +696,17 @@ vcopy is also available as a reusable GitHub Action. Clone this repo into your o
 All CLI flags are available as action inputs (`force`, `code-only`, `lfs`, `all-metadata`, etc.). The action runs in `--non-interactive` mode automatically.
 
 For full documentation, inputs/outputs reference, and example workflows, see **[action/README.md](action/README.md)**.
+
+## Troubleshooting / FAQ
+
+**The release binary is named `vcopy-windows-amd64.exe`, not `vcopy.exe`.**
+Pre-built binaries include the platform and architecture in the filename. You can either run it directly (`./vcopy-windows-amd64.exe myorg/repo target-org`) or rename it to `vcopy.exe` (or `vcopy` on Linux/macOS) so the examples in this README work as-is. No installation step is required — it's a standalone executable.
+
+**Authentication fails with "401 Unauthorized".**
+Ensure your token has the `repo` scope. For public source repos, use `--public` to skip source authentication entirely.
+
+**"Must have admin rights to Repository" when using `--force`.**
+Your target token needs admin-level access to the target repo. For organization-owned repos, ensure the token has `repo` scope and the user is an org owner or has admin role on the repo.
+
+**Verification fails on `refs/pull/*` refs.**
+GitHub creates hidden `refs/pull/*` refs for pull requests. These are read-only and cannot be pushed. vcopy automatically excludes them during verification — if you see failures, ensure you're on the latest version.
