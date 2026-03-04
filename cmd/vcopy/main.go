@@ -40,6 +40,9 @@ since        string
 reportPath   string
 signKey      string
 configPath   string
+noWorkflows    bool
+noCopilot      bool
+excludePaths   []string
 verbose        bool
 dryRun         bool
 nonInteractive bool
@@ -85,6 +88,9 @@ f.StringVar(&signKey, "sign", "", "GPG key ID to sign the verification report (A
 f.BoolVar(&verbose, "verbose", false, "Verbose output")
 f.BoolVar(&dryRun, "dry-run", false, "Show what would be done without making changes")
 	f.BoolVar(&nonInteractive, "non-interactive", false, "Skip confirmation prompts (for CI/CD and automation)")
+	f.BoolVar(&noWorkflows, "no-workflows", false, "Exclude GitHub Actions workflows (.github/workflows/) from the target")
+	f.BoolVar(&noCopilot, "no-copilot", false, "Exclude Copilot instructions and skills (.github/copilot-instructions.md, .github/copilot/) from the target")
+	f.StringSliceVar(&excludePaths, "exclude", nil, "Additional paths to exclude from the target (comma-separated or repeated)")
 
 if err := rootCmd.Execute(); err != nil {
 os.Exit(1)
@@ -138,6 +144,7 @@ fmt.Printf("Target:      %s/%s/%s\n", targetHost, targetOrg, repoName)
 fmt.Printf("LFS:         %v\n", lfs)
 fmt.Printf("Metadata:    issues=%v, PRs=%v, wiki=%v\n", copyIssues, copyPRs, copyWiki)
 		fmt.Printf("Code only:   %v\n", codeOnly)
+fmt.Printf("Exclude:     no-workflows=%v, no-copilot=%v, paths=%v\n", noWorkflows, noCopilot, excludePaths)
 fmt.Printf("Verify:      skip=%v, quick=%v, only=%v, since=%q\n", skipVerify, quickVerify, verifyOnly, since)
 fmt.Printf("Report:      %s\n", reportPath)
 fmt.Printf("Attestation: %s\n", signKey)
@@ -269,6 +276,17 @@ fmt.Printf("Warning: wiki copy failed (wiki may not exist): %v\n", err)
 }
 }
 
+// Exclude paths from target (post-push cleanup commit)
+excludeList, err := vcopy.BuildExcludePaths(noWorkflows, noCopilot, excludePaths)
+if err != nil {
+return fmt.Errorf("invalid exclude paths: %w", err)
+}
+if len(excludeList) > 0 && !verifyOnly {
+if err := vcopy.CleanupExcludedPaths(targetHost, targetOrg, repoName, tgtToken, excludeList, verbose); err != nil {
+return fmt.Errorf("exclude cleanup failed: %w", err)
+}
+}
+
 if !skipVerify {
 fmt.Println("\n=== Running Integrity Verification ===")
 
@@ -351,6 +369,9 @@ if reportPath == "" && cfg.Report.Path != "" { reportPath = cfg.Report.Path }
 if signKey == "" && cfg.Report.SignKey != "" { signKey = cfg.Report.SignKey }
 if !verbose { verbose = cfg.Verbose }
 	if !nonInteractive { nonInteractive = cfg.NonInteractive }
+	if !noWorkflows { noWorkflows = cfg.Exclude.Workflows }
+	if !noCopilot { noCopilot = cfg.Exclude.Copilot }
+	if len(excludePaths) == 0 && len(cfg.Exclude.Paths) > 0 { excludePaths = cfg.Exclude.Paths }
 }
 
 func parseRepo(repo string) (owner, name string, err error) {

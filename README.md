@@ -7,6 +7,7 @@ A CLI tool that copies GitHub repositories between organizations (Cloud and Ente
 - **Verified mirroring** of all branches, tags, and commit history
 - **Smart release sync**: tags and releases auto-sync; additive by default (preserves target-only content)
 - **Code-only mode**: `--code-only` to copy branches/commits without tags or releases
+- **Path exclusion**: `--no-workflows`, `--no-copilot`, and `--exclude` to remove specific files/directories from the target
 - **5-layer integrity verification**:
   1. Git object hash verification (every commit, tree, blob)
   2. Branch/tag ref comparison
@@ -117,6 +118,18 @@ vcopy myorg/myrepo target-org --all-metadata
 
 ```bash
 vcopy myorg/myrepo target-org --issues --wiki
+```
+
+### Copy without workflows or Copilot config
+
+```bash
+vcopy myorg/myrepo target-org --no-workflows --no-copilot
+```
+
+### Exclude custom paths
+
+```bash
+vcopy myorg/myrepo target-org --exclude vendor,docs/internal --no-workflows
 ```
 
 ### Verify only (no copy)
@@ -243,6 +256,9 @@ Creates a `git bundle` from each repo (a self-contained archive of all refs and 
 | `--verbose` | `false` | Show detailed output for every step (git commands, API calls, skipped items) |
 | `--dry-run` | `false` | Show what would happen without actually copying or modifying anything |
 | `--non-interactive` | `false` | Skip confirmation prompts — required for CI/CD and automation (the GitHub Action sets this automatically) |
+| `--no-workflows` | `false` | Exclude GitHub Actions workflows (`.github/workflows/`) from the target. A cleanup commit is added after push |
+| `--no-copilot` | `false` | Exclude Copilot instructions and skills (`.github/copilot-instructions.md`, `.github/copilot/`) from the target |
+| `--exclude` | | Comma-separated list of additional paths to exclude from the target (e.g., `--exclude vendor,docs/internal`). Can be repeated |
 
 ## Requirements
 
@@ -290,6 +306,52 @@ vcopy myorg/myrepo target-org --force
 ```
 
 > ⚠️ **WARNING**: `--force` will **permanently delete** any branches, tags, or commits in the target that do not exist in the source. This cannot be undone.
+
+## Path Exclusion
+
+You can exclude specific files and directories from the target repository. This is useful when the source contains GitHub Actions workflows, Copilot instructions, or other org-specific configuration that shouldn't carry over.
+
+### How it works
+
+vcopy first mirrors the full repository (preserving all history), then adds a **single cleanup commit** on the target's default branch that removes the excluded paths. This means:
+
+- **Full history is preserved** — every original commit is intact
+- **Verification still passes** — the 5-layer check compares source-to-target before the cleanup commit
+- **Transparent** — the cleanup commit is clearly labeled `vcopy: remove excluded paths`
+
+### Preset flags
+
+| Flag | Paths removed |
+|------|--------------|
+| `--no-workflows` | `.github/workflows/` |
+| `--no-copilot` | `.github/copilot-instructions.md`, `.github/copilot/` |
+
+### Custom paths
+
+Use `--exclude` to remove any paths. Comma-separated or repeated:
+
+```bash
+vcopy myorg/myrepo target-org --exclude vendor,docs/internal,scripts/deploy.sh
+```
+
+Combine presets and custom paths:
+
+```bash
+vcopy myorg/myrepo target-org --no-workflows --no-copilot --exclude vendor
+```
+
+### Config file
+
+```yaml
+exclude:
+  workflows: true
+  copilot: true
+  paths:
+    - vendor
+    - docs/internal
+```
+
+> **Note**: Paths that don't exist in the source are silently skipped. Absolute paths and traversal (`..`) are rejected.
 
 ## Hidden Refs (refs/pull/*)
 
@@ -391,6 +453,12 @@ verify:
 lfs: true
 force: false     # Destructive mirror push (prompts unless non_interactive is true)
 code_only: false # Copy only branches/commits (no tags or releases)
+
+exclude:
+  workflows: true  # Exclude .github/workflows/ from target
+  copilot: true    # Exclude Copilot instructions/skills from target
+  paths:           # Additional paths to exclude
+    - vendor
 
 report:
   path: audit.json

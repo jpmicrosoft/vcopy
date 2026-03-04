@@ -87,6 +87,9 @@ This triggers `.github/workflows/release.yml`, which:
 | `version` | | `latest` | vcopy release version (e.g., `v1.0.0`) |
 | `upload-report` | | `false` | Upload the verification report as a workflow artifact |
 | `artifact-name` | | `vcopy-verification-report` | Name for the uploaded artifact (used with `upload-report`) |
+| `no-workflows` | | `false` | Exclude GitHub Actions workflows (`.github/workflows/`) from the target |
+| `no-copilot` | | `false` | Exclude Copilot instructions/skills from the target |
+| `exclude` | | | Comma-separated paths to exclude from the target |
 
 ## Outputs
 
@@ -135,6 +138,32 @@ jobs:
           source-repo: source-org/my-repo
           target-org: target-org
           code-only: true
+          source-token: ${{ secrets.SOURCE_GITHUB_TOKEN }}
+          target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
+```
+
+### Exclude workflows and Copilot config
+
+```yaml
+      - uses: your-org/vcopy@v1
+        with:
+          source-repo: source-org/my-repo
+          target-org: target-org
+          no-workflows: true
+          no-copilot: true
+          source-token: ${{ secrets.SOURCE_GITHUB_TOKEN }}
+          target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
+```
+
+### Exclude custom paths
+
+```yaml
+      - uses: your-org/vcopy@v1
+        with:
+          source-repo: source-org/my-repo
+          target-org: target-org
+          no-workflows: true
+          exclude: vendor,docs/internal
           source-token: ${{ secrets.SOURCE_GITHUB_TOKEN }}
           target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
 ```

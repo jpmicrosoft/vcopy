@@ -27,6 +27,13 @@ code_only: false # Set to true to copy only branches/commits (no tags, releases,
 non_interactive: false # Set to true to skip confirmation prompts (for CI/CD)
 verbose: false
 
+exclude:
+  workflows: false # Set to true to exclude .github/workflows/ from the target
+  copilot: false   # Set to true to exclude Copilot instructions/skills from the target
+  # paths:         # Additional paths to exclude (uncomment and list as needed)
+  #   - vendor
+  #   - docs/internal
+
 report:
   path: audit.json
   sign_key: ABCD1234
