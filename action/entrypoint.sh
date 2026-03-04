@@ -150,6 +150,8 @@ if [ "${MODE}" = "batch" ]; then
   [ -n "${INPUT_PREFIX}" ] && ARGS+=("--prefix" "${INPUT_PREFIX}")
   [ -n "${INPUT_SUFFIX}" ] && ARGS+=("--suffix" "${INPUT_SUFFIX}")
   [ "${INPUT_SKIP_EXISTING}" = "true" ] && ARGS+=("--skip-existing")
+  [ -n "${INPUT_REPORT}" ] && ARGS+=("--report" "${INPUT_REPORT}")
+  [ "${INPUT_PER_REPO_REPORT}" = "true" ] && ARGS+=("--per-repo-report")
 else
   # Single mode: vcopy <source-repo> <target-org>
   if [ -z "${INPUT_SOURCE_REPO}" ]; then
