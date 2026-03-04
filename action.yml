@@ -145,6 +145,10 @@ inputs:
     description: 'Exclude entire .github/ directory from the target (supersedes --no-workflows, --no-actions, --no-copilot)'
     required: false
     default: 'false'
+  dry-run:
+    description: 'Show what would be done without making changes (preview mode)'
+    required: false
+    default: 'false'
   exclude:
     description: 'Comma-separated list of additional paths to exclude from the target'
     required: false
@@ -198,6 +202,7 @@ runs:
         INPUT_NO_ACTIONS: ${{ inputs.no-actions }}
         INPUT_NO_COPILOT: ${{ inputs.no-copilot }}
         INPUT_NO_GITHUB: ${{ inputs.no-github }}
+        INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_EXCLUDE: ${{ inputs.exclude }}
         GH_TOKEN: ${{ github.token }}
       run: ${{ github.action_path }}/action/entrypoint.sh
