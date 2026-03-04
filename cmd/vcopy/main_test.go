@@ -107,3 +107,28 @@ func TestApplyConfig_NoOverrideWhenSet(t *testing.T) {
 		t.Error("applyConfig should not reset nonInteractive when already true")
 	}
 }
+
+func TestBatchTargetName(t *testing.T) {
+	tests := []struct {
+		name       string
+		repoName   string
+		prefix     string
+		suffix     string
+		wantTarget string
+	}{
+		{"no prefix or suffix", "terraform-azurerm-avm-res-cache-redis", "", "", "terraform-azurerm-avm-res-cache-redis"},
+		{"prefix only", "terraform-azurerm-avm-res-cache-redis", "myorg-", "", "myorg-terraform-azurerm-avm-res-cache-redis"},
+		{"suffix only", "terraform-azurerm-avm-res-cache-redis", "", "-internal", "terraform-azurerm-avm-res-cache-redis-internal"},
+		{"both prefix and suffix", "terraform-azurerm-avm-res-cache-redis", "avm-", "-copy", "avm-terraform-azurerm-avm-res-cache-redis-copy"},
+		{"short name", "my-repo", "pre-", "-suf", "pre-my-repo-suf"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.prefix + tt.repoName + tt.suffix
+			if got != tt.wantTarget {
+				t.Errorf("batch name = %q, want %q", got, tt.wantTarget)
+			}
+		})
+	}
+}

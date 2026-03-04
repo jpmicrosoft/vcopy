@@ -339,3 +339,28 @@ func (c *Client) ListReleaseAssets(owner, repo string, releaseID int64) ([]*gh.R
 	}
 	return allAssets, nil
 }
+
+// SearchRepos finds repositories in a given org whose names contain the query string.
+// Returns a list of repo names (not full names — just the repo part).
+func (c *Client) SearchRepos(org, nameFilter string) ([]string, error) {
+	query := fmt.Sprintf("org:%s %s in:name", org, nameFilter)
+	opts := &gh.SearchOptions{
+		ListOptions: gh.ListOptions{PerPage: 100},
+	}
+
+	var repos []string
+	for {
+		result, resp, err := c.API.Search.Repositories(c.ctx, query, opts)
+		if err != nil {
+			return nil, fmt.Errorf("repo search failed: %w", err)
+		}
+		for _, r := range result.Repositories {
+			repos = append(repos, r.GetName())
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return repos, nil
+}
