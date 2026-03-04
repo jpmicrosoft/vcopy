@@ -210,6 +210,7 @@ runs:
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_EXCLUDE: ${{ inputs.exclude }}
         GH_TOKEN: ${{ github.token }}
+        VCOPY_ACTION_REPO: ${{ github.action_repository }}
       run: ${{ github.action_path }}/action/entrypoint.sh
 
     - name: Upload verification report
