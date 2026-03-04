@@ -146,7 +146,7 @@ inputs:
     required: false
     default: 'false'
   dry-run:
-    description: 'Show what would be done without making changes (preview mode)'
+    description: 'Show what would be done without making changes'
     required: false
     default: 'false'
   exclude:
