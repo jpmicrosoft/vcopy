@@ -21,10 +21,17 @@ type Client struct {
 }
 
 // NewClient creates a GitHub API client for the given host and token.
+// If token is empty, an unauthenticated client is created (suitable for public repos).
 func NewClient(host, token string) (*Client, error) {
 	ctx := context.Background()
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	httpClient := oauth2.NewClient(ctx, ts)
+
+	var httpClient *http.Client
+	if token != "" {
+		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
+		httpClient = oauth2.NewClient(ctx, ts)
+	} else {
+		httpClient = &http.Client{}
+	}
 
 	var client *gh.Client
 	if host == "github.com" {
