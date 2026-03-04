@@ -39,8 +39,8 @@ if [ "${VERSION}" != "latest" ]; then
   fi
 fi
 
-# github.action_repository is the repo where the action lives (supports clones/forks)
-ACTION_REPO="${GITHUB_ACTION_REPOSITORY:-${GITHUB_REPOSITORY}}"
+# VCOPY_ACTION_REPO is set by action.yml via github.action_repository
+ACTION_REPO="${VCOPY_ACTION_REPO:-${GITHUB_REPOSITORY}}"
 echo "Action repository: ${ACTION_REPO}"
 
 # ──────────────────────────────────────────────
