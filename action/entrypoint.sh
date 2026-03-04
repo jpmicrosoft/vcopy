@@ -132,8 +132,42 @@ VCOPY="${INSTALL_DIR}/vcopy${EXT}"
 # ──────────────────────────────────────────────
 ARGS=()
 
-# Required positional args
-ARGS+=("${INPUT_SOURCE_REPO}" "${INPUT_TARGET_ORG}")
+MODE="${INPUT_MODE:-single}"
+
+if [ "${MODE}" = "batch" ]; then
+  # Batch mode: vcopy batch <source-org> <target-org> --search <filter>
+  if [ -z "${INPUT_SOURCE_ORG}" ]; then
+    echo "::error::source-org is required when mode=batch"
+    exit 1
+  fi
+  if [ -z "${INPUT_SEARCH}" ]; then
+    echo "::error::search is required when mode=batch"
+    exit 1
+  fi
+
+  ARGS+=("batch" "${INPUT_SOURCE_ORG}" "${INPUT_TARGET_ORG}")
+  ARGS+=("--search" "${INPUT_SEARCH}")
+  [ -n "${INPUT_PREFIX}" ] && ARGS+=("--prefix" "${INPUT_PREFIX}")
+  [ -n "${INPUT_SUFFIX}" ] && ARGS+=("--suffix" "${INPUT_SUFFIX}")
+  [ "${INPUT_SKIP_EXISTING}" = "true" ] && ARGS+=("--skip-existing")
+else
+  # Single mode: vcopy <source-repo> <target-org>
+  if [ -z "${INPUT_SOURCE_REPO}" ]; then
+    echo "::error::source-repo is required when mode=single"
+    exit 1
+  fi
+  ARGS+=("${INPUT_SOURCE_REPO}" "${INPUT_TARGET_ORG}")
+  [ -n "${INPUT_TARGET_NAME}" ] && ARGS+=("--target-name" "${INPUT_TARGET_NAME}")
+  [ "${INPUT_FORCE}" = "true" ] && ARGS+=("--force")
+  [ "${INPUT_ISSUES}" = "true" ] && ARGS+=("--issues")
+  [ "${INPUT_PULL_REQUESTS}" = "true" ] && ARGS+=("--pull-requests")
+  [ "${INPUT_WIKI}" = "true" ] && ARGS+=("--wiki")
+  [ "${INPUT_ALL_METADATA}" = "true" ] && ARGS+=("--all-metadata")
+  [ "${INPUT_VERIFY_ONLY}" = "true" ] && ARGS+=("--verify-only")
+  [ -n "${INPUT_SINCE}" ] && ARGS+=("--since" "${INPUT_SINCE}")
+  [ -n "${INPUT_REPORT}" ] && ARGS+=("--report" "${INPUT_REPORT}")
+  [ -n "${INPUT_SIGN}" ] && ARGS+=("--sign" "${INPUT_SIGN}")
+fi
 
 # Auth — always use PAT mode in CI
 ARGS+=("--auth-method" "pat")
@@ -141,26 +175,14 @@ ARGS+=("--auth-method" "pat")
 # Always non-interactive in CI
 ARGS+=("--non-interactive")
 
-# String inputs
+# Shared flags (apply to both single and batch mode)
 [ -n "${INPUT_SOURCE_HOST}" ] && [ "${INPUT_SOURCE_HOST}" != "github.com" ] && ARGS+=("--source-host" "${INPUT_SOURCE_HOST}")
 [ -n "${INPUT_TARGET_HOST}" ] && [ "${INPUT_TARGET_HOST}" != "github.com" ] && ARGS+=("--target-host" "${INPUT_TARGET_HOST}")
-[ -n "${INPUT_TARGET_NAME}" ] && ARGS+=("--target-name" "${INPUT_TARGET_NAME}")
 [ -n "${INPUT_SOURCE_TOKEN}" ] && ARGS+=("--source-token" "${INPUT_SOURCE_TOKEN}")
 [ -n "${INPUT_TARGET_TOKEN}" ] && ARGS+=("--target-token" "${INPUT_TARGET_TOKEN}")
-[ -n "${INPUT_SINCE}" ] && ARGS+=("--since" "${INPUT_SINCE}")
-[ -n "${INPUT_REPORT}" ] && ARGS+=("--report" "${INPUT_REPORT}")
-[ -n "${INPUT_SIGN}" ] && ARGS+=("--sign" "${INPUT_SIGN}")
-
-# Boolean inputs
 [ "${INPUT_PUBLIC}" = "true" ] && ARGS+=("--public")
 [ "${INPUT_LFS}" = "true" ] && ARGS+=("--lfs")
-[ "${INPUT_FORCE}" = "true" ] && ARGS+=("--force")
 [ "${INPUT_CODE_ONLY}" = "true" ] && ARGS+=("--code-only")
-[ "${INPUT_ISSUES}" = "true" ] && ARGS+=("--issues")
-[ "${INPUT_PULL_REQUESTS}" = "true" ] && ARGS+=("--pull-requests")
-[ "${INPUT_WIKI}" = "true" ] && ARGS+=("--wiki")
-[ "${INPUT_ALL_METADATA}" = "true" ] && ARGS+=("--all-metadata")
-[ "${INPUT_VERIFY_ONLY}" = "true" ] && ARGS+=("--verify-only")
 [ "${INPUT_SKIP_VERIFY}" = "true" ] && ARGS+=("--skip-verify")
 [ "${INPUT_QUICK_VERIFY}" = "true" ] && ARGS+=("--quick-verify")
 [ "${INPUT_VERBOSE}" = "true" ] && ARGS+=("--verbose")

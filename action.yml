@@ -8,11 +8,36 @@ branding:
 
 inputs:
   source-repo:
-    description: 'Source repository in owner/repo format (e.g., myorg/myrepo)'
-    required: true
+    description: 'Source repository in owner/repo format (e.g., myorg/myrepo). Required for single-repo mode.'
+    required: false
+    default: ''
   target-org:
     description: 'Target organization or user account to copy the repo into'
     required: true
+  mode:
+    description: 'Copy mode: "single" (default) copies one repo, "batch" discovers and copies multiple repos'
+    required: false
+    default: 'single'
+  source-org:
+    description: 'Source organization for batch mode (e.g., Azure). Required when mode=batch.'
+    required: false
+    default: ''
+  search:
+    description: 'Repository name filter for batch mode (e.g., terraform-azurerm-avm-). Required when mode=batch.'
+    required: false
+    default: ''
+  prefix:
+    description: 'Prefix to prepend to each target repo name (batch mode)'
+    required: false
+    default: ''
+  suffix:
+    description: 'Suffix to append to each target repo name (batch mode)'
+    required: false
+    default: ''
+  skip-existing:
+    description: 'Skip repos that already exist in the target org (batch mode, useful for resuming)'
+    required: false
+    default: 'false'
   source-host:
     description: 'Source GitHub hostname'
     required: false
@@ -142,6 +167,12 @@ runs:
       env:
         INPUT_SOURCE_REPO: ${{ inputs.source-repo }}
         INPUT_TARGET_ORG: ${{ inputs.target-org }}
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_SOURCE_ORG: ${{ inputs.source-org }}
+        INPUT_SEARCH: ${{ inputs.search }}
+        INPUT_PREFIX: ${{ inputs.prefix }}
+        INPUT_SUFFIX: ${{ inputs.suffix }}
+        INPUT_SKIP_EXISTING: ${{ inputs.skip-existing }}
         INPUT_SOURCE_HOST: ${{ inputs.source-host }}
         INPUT_TARGET_HOST: ${{ inputs.target-host }}
         INPUT_TARGET_NAME: ${{ inputs.target-name }}

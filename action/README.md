@@ -62,9 +62,15 @@ This triggers `.github/workflows/release.yml`, which:
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `source-repo` | ✅ | | Source repository in `owner/repo` format |
+| `source-repo` | | | Source repository in `owner/repo` format. Required for single-repo mode. |
 | `target-org` | ✅ | | Target organization or user account |
 | `target-token` | ✅ | | Personal Access Token for the target instance |
+| `mode` | | `single` | Copy mode: `single` (one repo) or `batch` (multiple repos via search) |
+| `source-org` | | | Source organization for batch mode (e.g., `Azure`). Required when `mode=batch`. |
+| `search` | | | Repo name filter for batch mode (e.g., `terraform-azurerm-avm-`). Required when `mode=batch`. |
+| `prefix` | | | Prefix for target repo names (batch mode) |
+| `suffix` | | | Suffix for target repo names (batch mode) |
+| `skip-existing` | | `false` | Skip repos already in target org (batch mode, for resuming) |
 | `source-token` | | | PAT for the source instance (not needed for public repos) |
 | `source-host` | | `github.com` | Source GitHub hostname |
 | `target-host` | | `github.com` | Target GitHub hostname (e.g., `github.mycompany.com`) |
@@ -254,6 +260,46 @@ jobs:
           source-repo: upstream-org/shared-lib
           target-org: my-org
           quick-verify: true
+          source-token: ${{ secrets.SOURCE_GITHUB_TOKEN }}
+          target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
+```
+
+### Batch copy all Azure Terraform AVM modules
+
+```yaml
+name: Batch Copy AVM Modules
+on:
+  workflow_dispatch:
+
+jobs:
+  batch-copy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: your-org/vcopy@v1
+        with:
+          mode: batch
+          source-org: Azure
+          target-org: my-org
+          search: 'terraform-azurerm-avm-'
+          public: true
+          no-github: true
+          skip-verify: true
+          skip-existing: true
+          target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
+```
+
+### Batch copy with prefix/suffix naming
+
+```yaml
+      - uses: your-org/vcopy@v1
+        with:
+          mode: batch
+          source-org: source-org
+          target-org: target-org
+          search: 'service-'
+          prefix: 'imported-'
+          suffix: '-v2'
+          skip-existing: true
           source-token: ${{ secrets.SOURCE_GITHUB_TOKEN }}
           target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
 ```
