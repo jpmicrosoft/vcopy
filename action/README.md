@@ -97,6 +97,7 @@ This triggers `.github/workflows/release.yml`, which:
 | `no-actions` | | `false` | Exclude GitHub Actions custom actions (`.github/actions/`) from the target |
 | `no-copilot` | | `false` | Exclude Copilot instructions/skills from the target |
 | `no-github` | | `false` | Exclude entire `.github/` directory (supersedes `no-workflows`, `no-actions`, `no-copilot`) |
+| `dry-run` | | `false` | Preview mode — show what would be done without making changes |
 | `exclude` | | | Comma-separated paths to exclude from the target |
 
 > **Note**: `CODEOWNERS` files (`CODEOWNERS`, `.github/CODEOWNERS`, `docs/CODEOWNERS`) are **always removed** on every copy because they reference source org teams/users that won't exist in the target.
