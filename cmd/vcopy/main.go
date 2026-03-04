@@ -276,17 +276,6 @@ fmt.Printf("Warning: wiki copy failed (wiki may not exist): %v\n", err)
 }
 }
 
-// Exclude paths from target (post-push cleanup commit)
-excludeList, err := vcopy.BuildExcludePaths(noWorkflows, noCopilot, excludePaths)
-if err != nil {
-return fmt.Errorf("invalid exclude paths: %w", err)
-}
-if len(excludeList) > 0 && !verifyOnly {
-if err := vcopy.CleanupExcludedPaths(targetHost, targetOrg, repoName, tgtToken, excludeList, verbose); err != nil {
-return fmt.Errorf("exclude cleanup failed: %w", err)
-}
-}
-
 if !skipVerify {
 fmt.Println("\n=== Running Integrity Verification ===")
 
@@ -329,6 +318,17 @@ return fmt.Errorf("VERIFICATION FAILED: one or more checks did not pass")
 fmt.Println("\nAll verification checks passed. Repository copy is verified.")
 } else {
 fmt.Println("\nCopy complete (verification skipped).")
+}
+
+// Exclude paths from target (post-verification cleanup commit)
+excludeList, err := vcopy.BuildExcludePaths(noWorkflows, noCopilot, excludePaths)
+if err != nil {
+return fmt.Errorf("invalid exclude paths: %w", err)
+}
+if len(excludeList) > 0 && !verifyOnly {
+if err := vcopy.CleanupExcludedPaths(targetHost, targetOrg, repoName, tgtToken, excludeList, verbose); err != nil {
+return fmt.Errorf("exclude cleanup failed: %w", err)
+}
 }
 
 return nil
