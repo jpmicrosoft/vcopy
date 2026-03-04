@@ -57,11 +57,16 @@ fi
 
 echo "Fetching release info from: ${RELEASE_URL}"
 
-# Use GH_TOKEN for authentication (required for private repos)
-RELEASE_JSON=$(curl -sSfL \
-  -H "Authorization: token ${GH_TOKEN}" \
-  -H "Accept: application/vnd.github+json" \
-  "${RELEASE_URL}") || {
+# Try authenticated first, fall back to unauthenticated (public action repos)
+fetch_release() {
+  if [ -n "${GH_TOKEN}" ]; then
+    curl -sSfL -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$1" 2>/dev/null && return 0
+  fi
+  curl -sSfL -H "Accept: application/vnd.github+json" "$1" 2>/dev/null && return 0
+  return 1
+}
+
+RELEASE_JSON=$(fetch_release "${RELEASE_URL}") || {
   echo "::error::Failed to fetch release. Ensure a release exists and the token has access."
   exit 1
 }
@@ -81,11 +86,17 @@ echo "Downloading: ${ASSET_URL}"
 ASSET_ID=$(echo "${RELEASE_JSON}" | grep -B5 "${BINARY_NAME}" | grep -o '"id":[[:space:]]*[0-9]*' | head -1 | grep -o '[0-9]*')
 ASSET_API_URL="https://api.github.com/repos/${ACTION_REPO}/releases/assets/${ASSET_ID}"
 
-curl -sSfL \
-  -H "Authorization: token ${GH_TOKEN}" \
-  -H "Accept: application/octet-stream" \
-  "${ASSET_API_URL}" \
-  -o "${INSTALL_DIR}/vcopy${EXT}" || {
+download_asset() {
+  if [ -n "${GH_TOKEN}" ]; then
+    curl -sSfL -H "Authorization: token ${GH_TOKEN}" -H "Accept: application/octet-stream" "$1" -o "$2" 2>/dev/null && return 0
+  fi
+  curl -sSfL -H "Accept: application/octet-stream" "$1" -o "$2" 2>/dev/null && return 0
+  # Last resort: try browser URL directly (public repos)
+  curl -sSfL -L "${ASSET_URL}" -o "$2" 2>/dev/null && return 0
+  return 1
+}
+
+download_asset "${ASSET_API_URL}" "${INSTALL_DIR}/vcopy${EXT}" || {
   echo "::error::Failed to download vcopy binary."
   exit 1
 }
@@ -97,11 +108,7 @@ CHECKSUM_ID=$(echo "${RELEASE_JSON}" | grep -B5 "checksums.txt" | grep -o '"id":
 
 if [ -n "${CHECKSUM_ID}" ]; then
   CHECKSUM_API_URL="https://api.github.com/repos/${ACTION_REPO}/releases/assets/${CHECKSUM_ID}"
-  curl -sSfL \
-    -H "Authorization: token ${GH_TOKEN}" \
-    -H "Accept: application/octet-stream" \
-    "${CHECKSUM_API_URL}" \
-    -o "${INSTALL_DIR}/checksums.txt" || {
+  download_asset "${CHECKSUM_API_URL}" "${INSTALL_DIR}/checksums.txt" || {
     echo "::warning::Could not download checksums.txt — skipping integrity check."
   }
 

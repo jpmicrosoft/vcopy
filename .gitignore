@@ -1,3 +1,4 @@
 *.exe
 bin/
 error.txt
+vcopy_action_testing/
