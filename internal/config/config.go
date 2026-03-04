@@ -26,7 +26,9 @@ type Config struct {
 // ExcludeConfig holds path exclusion settings.
 type ExcludeConfig struct {
 	Workflows bool     `yaml:"workflows"` // exclude .github/workflows
+	Actions   bool     `yaml:"actions"`   // exclude .github/actions
 	Copilot   bool     `yaml:"copilot"`   // exclude .github/copilot-instructions.md, .github/copilot/
+	GitHub    bool     `yaml:"github"`    // exclude entire .github directory
 	Paths     []string `yaml:"paths"`     // additional paths to exclude
 }
 

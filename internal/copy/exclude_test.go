@@ -5,14 +5,13 @@ import (
 )
 
 func TestBuildExcludePaths_Presets(t *testing.T) {
-	// Both presets enabled — workflows(2) + copilot(2) + codeowners(3 always)
-	paths, err := BuildExcludePaths(true, true, nil)
+	// Both workflow + copilot presets — workflows(1) + copilot(2) + codeowners(3 always)
+	paths, err := BuildExcludePaths(true, false, true, false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	expected := map[string]bool{
 		".github/workflows":              true,
-		".github/actions":                true,
 		".github/copilot-instructions.md": true,
 		".github/copilot":                true,
 		"CODEOWNERS":                     true,
@@ -31,7 +30,7 @@ func TestBuildExcludePaths_Presets(t *testing.T) {
 
 func TestBuildExcludePaths_NoPresets(t *testing.T) {
 	// No presets — still gets CODEOWNERS (3 always-excluded paths)
-	paths, err := BuildExcludePaths(false, false, nil)
+	paths, err := BuildExcludePaths(false, false, false, false, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -42,7 +41,7 @@ func TestBuildExcludePaths_NoPresets(t *testing.T) {
 
 func TestBuildExcludePaths_Custom(t *testing.T) {
 	// 2 custom + 3 CODEOWNERS = 5
-	paths, err := BuildExcludePaths(false, false, []string{"docs/internal", "scripts/deploy.sh"})
+	paths, err := BuildExcludePaths(false, false, false, false, []string{"docs/internal", "scripts/deploy.sh"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -52,24 +51,57 @@ func TestBuildExcludePaths_Custom(t *testing.T) {
 }
 
 func TestBuildExcludePaths_Dedup(t *testing.T) {
-	// Preset + custom that overlaps — workflows(2) + 1 overlap + CODEOWNERS(3) = 5
-	paths, err := BuildExcludePaths(true, false, []string{".github/workflows"})
+	// Preset + custom that overlaps — workflows(1) + 1 overlap + CODEOWNERS(3) = 4
+	paths, err := BuildExcludePaths(true, false, false, false, []string{".github/workflows"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(paths) != 5 {
-		t.Errorf("expected 5 paths (deduped), got %d: %v", len(paths), paths)
+	if len(paths) != 4 {
+		t.Errorf("expected 4 paths (deduped), got %d: %v", len(paths), paths)
 	}
 }
 
 func TestBuildExcludePaths_Mixed(t *testing.T) {
-	// workflows(2) + copilot(2) + custom(2) + CODEOWNERS(3) = 9
-	paths, err := BuildExcludePaths(true, true, []string{"vendor", "docs/secret"})
+	// workflows(1) + actions(1) + copilot(2) + custom(2) + CODEOWNERS(3) = 9
+	paths, err := BuildExcludePaths(true, true, true, false, []string{"vendor", "docs/secret"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(paths) != 9 {
 		t.Fatalf("expected 9 paths, got %d: %v", len(paths), paths)
+	}
+}
+
+func TestBuildExcludePaths_NoGitHub(t *testing.T) {
+	// --no-github supersedes individual flags — .github(1) + CODEOWNERS(3) = 4
+	paths, err := BuildExcludePaths(true, true, true, true, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := map[string]bool{
+		".github":            true,
+		"CODEOWNERS":         true,
+		".github/CODEOWNERS": true,
+		"docs/CODEOWNERS":    true,
+	}
+	if len(paths) != len(expected) {
+		t.Fatalf("expected %d paths, got %d: %v", len(expected), len(paths), paths)
+	}
+	for _, p := range paths {
+		if !expected[p] {
+			t.Errorf("unexpected path: %q", p)
+		}
+	}
+}
+
+func TestBuildExcludePaths_NoActions(t *testing.T) {
+	// --no-actions only — actions(1) + CODEOWNERS(3) = 4
+	paths, err := BuildExcludePaths(false, true, false, false, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(paths) != 4 {
+		t.Fatalf("expected 4 paths, got %d: %v", len(paths), paths)
 	}
 }
 
@@ -114,7 +146,7 @@ func TestSanitizeExcludePath(t *testing.T) {
 }
 
 func TestBuildExcludePaths_InvalidPath(t *testing.T) {
-	_, err := BuildExcludePaths(false, false, []string{"valid/path", "../traversal"})
+	_, err := BuildExcludePaths(false, false, false, false, []string{"valid/path", "../traversal"})
 	if err == nil {
 		t.Error("expected error for traversal path, got nil")
 	}

@@ -29,7 +29,9 @@ verbose: false
 
 exclude:
   workflows: false # Set to true to exclude .github/workflows/ from the target
+  actions: false   # Set to true to exclude .github/actions/ from the target
   copilot: false   # Set to true to exclude Copilot instructions/skills from the target
+  github: false    # Set to true to exclude entire .github/ directory (supersedes workflows, actions, copilot)
   # paths:         # Additional paths to exclude (uncomment and list as needed)
   #   - vendor
   #   - docs/internal

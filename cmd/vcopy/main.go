@@ -42,6 +42,8 @@ signKey      string
 configPath   string
 noWorkflows    bool
 noCopilot      bool
+noActions      bool
+noGitHub       bool
 excludePaths   []string
 verbose        bool
 dryRun         bool
@@ -89,7 +91,9 @@ f.BoolVar(&verbose, "verbose", false, "Verbose output")
 f.BoolVar(&dryRun, "dry-run", false, "Show what would be done without making changes")
 	f.BoolVar(&nonInteractive, "non-interactive", false, "Skip confirmation prompts (for CI/CD and automation)")
 	f.BoolVar(&noWorkflows, "no-workflows", false, "Exclude GitHub Actions workflows (.github/workflows/) from the target")
+	f.BoolVar(&noActions, "no-actions", false, "Exclude GitHub Actions custom actions (.github/actions/) from the target")
 	f.BoolVar(&noCopilot, "no-copilot", false, "Exclude Copilot instructions and skills (.github/copilot-instructions.md, .github/copilot/) from the target")
+	f.BoolVar(&noGitHub, "no-github", false, "Exclude entire .github/ directory from the target (supersedes --no-workflows, --no-actions, --no-copilot)")
 	f.StringSliceVar(&excludePaths, "exclude", nil, "Additional paths to exclude from the target (comma-separated or repeated)")
 
 if err := rootCmd.Execute(); err != nil {
@@ -144,7 +148,7 @@ fmt.Printf("Target:      %s/%s/%s\n", targetHost, targetOrg, repoName)
 fmt.Printf("LFS:         %v\n", lfs)
 fmt.Printf("Metadata:    issues=%v, PRs=%v, wiki=%v\n", copyIssues, copyPRs, copyWiki)
 		fmt.Printf("Code only:   %v\n", codeOnly)
-fmt.Printf("Exclude:     no-workflows=%v, no-copilot=%v, paths=%v\n", noWorkflows, noCopilot, excludePaths)
+fmt.Printf("Exclude:     no-workflows=%v, no-actions=%v, no-copilot=%v, no-github=%v, paths=%v\n", noWorkflows, noActions, noCopilot, noGitHub, excludePaths)
 fmt.Printf("Verify:      skip=%v, quick=%v, only=%v, since=%q\n", skipVerify, quickVerify, verifyOnly, since)
 fmt.Printf("Report:      %s\n", reportPath)
 fmt.Printf("Attestation: %s\n", signKey)
@@ -321,7 +325,7 @@ fmt.Println("\nCopy complete (verification skipped).")
 }
 
 // Exclude paths from target (post-verification cleanup commit)
-excludeList, err := vcopy.BuildExcludePaths(noWorkflows, noCopilot, excludePaths)
+excludeList, err := vcopy.BuildExcludePaths(noWorkflows, noActions, noCopilot, noGitHub, excludePaths)
 if err != nil {
 return fmt.Errorf("invalid exclude paths: %w", err)
 }
@@ -370,7 +374,9 @@ if signKey == "" && cfg.Report.SignKey != "" { signKey = cfg.Report.SignKey }
 if !verbose { verbose = cfg.Verbose }
 	if !nonInteractive { nonInteractive = cfg.NonInteractive }
 	if !noWorkflows { noWorkflows = cfg.Exclude.Workflows }
+	if !noActions { noActions = cfg.Exclude.Actions }
 	if !noCopilot { noCopilot = cfg.Exclude.Copilot }
+	if !noGitHub { noGitHub = cfg.Exclude.GitHub }
 	if len(excludePaths) == 0 && len(cfg.Exclude.Paths) > 0 { excludePaths = cfg.Exclude.Paths }
 }
 
