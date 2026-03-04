@@ -4,7 +4,7 @@ A reusable GitHub Action that copies repositories between GitHub organizations (
 
 ## How It Works
 
-1. The action downloads a pre-built `vcopy` binary from the action repository's GitHub Releases
+1. The action downloads a pre-built `vcopy` binary from the [latest release](https://github.com/jpmicrosoft/vcopy/releases)
 2. Maps your workflow inputs to CLI flags
 3. Runs the copy and/or verification
 4. Reports the verification status as an output
@@ -12,7 +12,7 @@ A reusable GitHub Action that copies repositories between GitHub organizations (
 ## Quick Start
 
 ```yaml
-- uses: your-org/vcopy@v1
+- uses: jpmicrosoft/vcopy@v1
   with:
     source-repo: source-org/my-repo
     target-org: target-org
@@ -20,43 +20,7 @@ A reusable GitHub Action that copies repositories between GitHub organizations (
     target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
 ```
 
-## Setup in Your Organization
-
-Since this is a private repository, you'll need to clone or fork it into your own GitHub organization to use the action.
-
-### Step 1: Clone the repo to your org
-
-```bash
-# Clone vcopy to your org
-git clone https://github.com/original-owner/vcopy.git
-cd vcopy
-git remote set-url origin https://github.com/your-org/vcopy.git
-git push --mirror
-```
-
-### Step 2: Create a release
-
-The action downloads pre-built binaries from your repo's GitHub Releases. Push a version tag to trigger the release workflow:
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-This triggers `.github/workflows/release.yml`, which:
-- Builds binaries for Linux, macOS, and Windows (amd64 + arm64)
-- Creates a GitHub Release with all binaries attached
-- Updates the floating `v1` tag so `uses: your-org/vcopy@v1` always gets the latest
-
-### Step 3: Use in your workflows
-
-```yaml
-- uses: your-org/vcopy@v1
-  with:
-    source-repo: source-org/my-repo
-    target-org: target-org
-    target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
-```
+No setup required — the action is publicly available from the GitHub Marketplace.
 
 ## Inputs
 
@@ -123,7 +87,7 @@ jobs:
   copy:
     runs-on: ubuntu-latest
     steps:
-      - uses: your-org/vcopy@v1
+      - uses: jpmicrosoft/vcopy@v1
         with:
           source-repo: source-org/my-repo
           target-org: target-org
@@ -134,7 +98,7 @@ jobs:
 ### Copy public repo (no source token needed)
 
 ```yaml
-      - uses: your-org/vcopy@v1
+      - uses: jpmicrosoft/vcopy@v1
         with:
           source-repo: kubernetes/kubernetes
           target-org: my-org
@@ -145,7 +109,7 @@ jobs:
 ### Code only (no tags or releases)
 
 ```yaml
-      - uses: your-org/vcopy@v1
+      - uses: jpmicrosoft/vcopy@v1
         with:
           source-repo: source-org/my-repo
           target-org: target-org
@@ -157,7 +121,7 @@ jobs:
 ### Exclude workflows and Copilot config
 
 ```yaml
-      - uses: your-org/vcopy@v1
+      - uses: jpmicrosoft/vcopy@v1
         with:
           source-repo: source-org/my-repo
           target-org: target-org
@@ -170,7 +134,7 @@ jobs:
 ### Exclude custom paths
 
 ```yaml
-      - uses: your-org/vcopy@v1
+      - uses: jpmicrosoft/vcopy@v1
         with:
           source-repo: source-org/my-repo
           target-org: target-org
@@ -183,7 +147,7 @@ jobs:
 ### Copy to GitHub Enterprise Server
 
 ```yaml
-      - uses: your-org/vcopy@v1
+      - uses: jpmicrosoft/vcopy@v1
         with:
           source-repo: cloud-org/my-repo
           target-org: enterprise-org
@@ -195,7 +159,7 @@ jobs:
 ### Force overwrite existing target
 
 ```yaml
-      - uses: your-org/vcopy@v1
+      - uses: jpmicrosoft/vcopy@v1
         with:
           source-repo: source-org/my-repo
           target-org: target-org
@@ -209,7 +173,7 @@ jobs:
 ### Verify only (no copy)
 
 ```yaml
-      - uses: your-org/vcopy@v1
+      - uses: jpmicrosoft/vcopy@v1
         id: verify
         with:
           source-repo: source-org/my-repo
@@ -226,7 +190,7 @@ jobs:
 ### Copy with all metadata and audit report
 
 ```yaml
-      - uses: your-org/vcopy@v1
+      - uses: jpmicrosoft/vcopy@v1
         with:
           source-repo: source-org/my-repo
           target-org: target-org
@@ -257,7 +221,7 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: your-org/vcopy@v1
+      - uses: jpmicrosoft/vcopy@v1
         with:
           source-repo: upstream-org/shared-lib
           target-org: my-org
@@ -277,7 +241,7 @@ jobs:
   batch-copy:
     runs-on: ubuntu-latest
     steps:
-      - uses: your-org/vcopy@v1
+      - uses: jpmicrosoft/vcopy@v1
         with:
           mode: batch
           source-org: Azure
@@ -293,7 +257,7 @@ jobs:
 ### Batch copy with prefix/suffix naming
 
 ```yaml
-      - uses: your-org/vcopy@v1
+      - uses: jpmicrosoft/vcopy@v1
         with:
           mode: batch
           source-org: source-org
@@ -309,7 +273,7 @@ jobs:
 ### Batch copy with audit report
 
 ```yaml
-      - uses: your-org/vcopy@v1
+      - uses: jpmicrosoft/vcopy@v1
         with:
           mode: batch
           source-org: Azure
