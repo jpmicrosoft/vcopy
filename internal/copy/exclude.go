@@ -90,7 +90,7 @@ func BuildExcludePaths(noWorkflows, noActions, noCopilot, noGitHub bool, extraPa
 // Rejects absolute paths, traversal attempts, and empty strings.
 func sanitizeExcludePath(p string) (string, error) {
 	p = strings.TrimSpace(p)
-	p = filepath.ToSlash(p) // normalise to forward slashes for git
+	p = strings.ReplaceAll(p, "\\", "/") // normalise to forward slashes for git (cross-platform)
 	p = strings.TrimPrefix(p, "./")
 	p = strings.TrimSuffix(p, "/")
 
