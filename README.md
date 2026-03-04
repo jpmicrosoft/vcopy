@@ -719,3 +719,17 @@ Your target token needs admin-level access to the target repo. For organization-
 
 **Verification fails on `refs/pull/*` refs.**
 GitHub creates hidden `refs/pull/*` refs for pull requests. These are read-only and cannot be pushed. vcopy automatically excludes them during verification — if you see failures, ensure you're on the latest version.
+
+**Windows SmartScreen warns "Windows protected your PC" when running the binary.**
+This is expected for any unsigned executable downloaded from the internet. SmartScreen uses reputation-based filtering — new binaries with few downloads will trigger the warning. Two options:
+
+- **Run anyway**: Click **"More info"** → **"Run anyway"**. The binary is safe — you can verify its integrity by comparing the SHA-256 checksum from the release's `checksums.txt` against the downloaded file:
+  ```powershell
+  (Get-FileHash vcopy-windows-amd64.exe -Algorithm SHA256).Hash
+  ```
+- **Build from source** (no SmartScreen warning): Building locally produces a binary that Windows trusts since it wasn't downloaded from the internet:
+  ```powershell
+  git clone https://github.com/jpmicrosoft/vcopy.git
+  cd vcopy
+  go build -o vcopy.exe ./cmd/vcopy
+  ```
