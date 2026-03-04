@@ -71,6 +71,7 @@ This triggers `.github/workflows/release.yml`, which:
 | `prefix` | | | Prefix for target repo names (batch mode) |
 | `suffix` | | | Suffix for target repo names (batch mode) |
 | `skip-existing` | | `false` | Skip repos already in target org (batch mode, for resuming) |
+| `per-repo-report` | | `false` | Also write individual JSON reports per repo in batch mode (e.g., `report-reponame.json`) |
 | `source-token` | | | PAT for the source instance (not needed for public repos) |
 | `source-host` | | `github.com` | Source GitHub hostname |
 | `target-host` | | `github.com` | Target GitHub hostname (e.g., `github.mycompany.com`) |
@@ -87,7 +88,7 @@ This triggers `.github/workflows/release.yml`, which:
 | `skip-verify` | | `false` | Skip verification after copy |
 | `quick-verify` | | `false` | Quick verification (refs + tree hashes only) |
 | `since` | | | Incremental verify: only objects after this SHA or date |
-| `report` | | | File path for JSON verification report |
+| `report` | | | File path for JSON verification report (single mode: per-repo, batch mode: combined) |
 | `sign` | | | GPG key ID to sign the report |
 | `verbose` | | `false` | Show detailed output |
 | `version` | | `latest` | vcopy release version (e.g., `v1.0.0`) |
@@ -304,6 +305,27 @@ jobs:
           source-token: ${{ secrets.SOURCE_GITHUB_TOKEN }}
           target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
 ```
+
+### Batch copy with audit report
+
+```yaml
+      - uses: your-org/vcopy@v1
+        with:
+          mode: batch
+          source-org: Azure
+          target-org: my-org
+          search: 'terraform-azurerm-avm-'
+          public: true
+          no-github: true
+          skip-existing: true
+          report: batch-report.json
+          per-repo-report: true
+          upload-report: true
+          artifact-name: avm-batch-audit
+          target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
+```
+
+This writes a combined `batch-report.json` with all repos plus individual `batch-report-reponame.json` files for each repo.
 
 ## Token Permissions
 
