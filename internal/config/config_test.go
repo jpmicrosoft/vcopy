@@ -137,3 +137,36 @@ func TestLoad_FileNotFound(t *testing.T) {
 		t.Fatal("expected error for missing file")
 	}
 }
+
+func TestLoad_ExcludeConfig(t *testing.T) {
+	content := `
+source:
+  repo: a/b
+target:
+  org: c
+exclude:
+  workflows: true
+  copilot: true
+  paths:
+    - vendor
+    - docs/internal
+`
+	tmpDir, _ := os.MkdirTemp("", "vcopy-cfg-*")
+	defer os.RemoveAll(tmpDir)
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+	os.WriteFile(cfgPath, []byte(content), 0644)
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if !cfg.Exclude.Workflows {
+		t.Error("Exclude.Workflows should be true")
+	}
+	if !cfg.Exclude.Copilot {
+		t.Error("Exclude.Copilot should be true")
+	}
+	if len(cfg.Exclude.Paths) != 2 {
+		t.Errorf("expected 2 exclude paths, got %d", len(cfg.Exclude.Paths))
+	}
+}

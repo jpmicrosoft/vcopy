@@ -15,11 +15,19 @@ type Config struct {
 	Copy     CopyConfig     `yaml:"copy"`
 	Verify   VerifyConfig   `yaml:"verify"`
 	Report   ReportConfig   `yaml:"report"`
+	Exclude  ExcludeConfig  `yaml:"exclude"`
 	LFS            bool           `yaml:"lfs"`
 	Force          bool           `yaml:"force"`
 	CodeOnly       bool           `yaml:"code_only"`
 	NonInteractive bool           `yaml:"non_interactive"`
 	Verbose        bool           `yaml:"verbose"`
+}
+
+// ExcludeConfig holds path exclusion settings.
+type ExcludeConfig struct {
+	Workflows bool     `yaml:"workflows"` // exclude .github/workflows
+	Copilot   bool     `yaml:"copilot"`   // exclude .github/copilot-instructions.md, .github/copilot/
+	Paths     []string `yaml:"paths"`     // additional paths to exclude
 }
 
 // SourceConfig holds source repository settings.

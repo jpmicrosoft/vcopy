@@ -164,6 +164,9 @@ ARGS+=("--non-interactive")
 [ "${INPUT_SKIP_VERIFY}" = "true" ] && ARGS+=("--skip-verify")
 [ "${INPUT_QUICK_VERIFY}" = "true" ] && ARGS+=("--quick-verify")
 [ "${INPUT_VERBOSE}" = "true" ] && ARGS+=("--verbose")
+[ "${INPUT_NO_WORKFLOWS}" = "true" ] && ARGS+=("--no-workflows")
+[ "${INPUT_NO_COPILOT}" = "true" ] && ARGS+=("--no-copilot")
+[ -n "${INPUT_EXCLUDE}" ] && ARGS+=("--exclude" "${INPUT_EXCLUDE}")
 
 # ──────────────────────────────────────────────
 # 6. Run vcopy (tokens are masked by GitHub Actions automatically)
