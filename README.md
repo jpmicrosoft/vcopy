@@ -2,6 +2,63 @@
 
 A CLI tool that copies GitHub repositories between organizations (Cloud and Enterprise) with comprehensive integrity verification.
 
+## Quick Start
+
+**You need:** `git` in PATH, a token with `repo` scope on both source and target, and optionally the [`gh` CLI](https://cli.github.com/) for automatic token detection. To build from source you also need Go 1.21+.
+
+**Install:**
+
+```bash
+go install github.com/jaiperez/vcopy/cmd/vcopy@latest
+```
+
+Or download a pre-built binary from [Releases](https://github.com/jpmicrosoft/vcopy/releases).
+
+**Copy a repo:**
+
+```bash
+vcopy myorg/myrepo target-org
+```
+
+That's it. vcopy will authenticate, create the target as private, mirror all branches/tags/history, sync releases, run 5-layer integrity verification, and print a pass/fail report.
+
+**Common variations:**
+
+```bash
+# Copy to GitHub Enterprise
+vcopy myorg/myrepo target-org --target-host github.mycompany.com
+
+# Copy a public repo (no source token needed)
+vcopy golang/go my-org --public
+
+# Code only — no tags, releases, or metadata
+vcopy myorg/myrepo target-org --code-only
+
+# Copy without source CI/CD workflows or Copilot config
+vcopy myorg/myrepo target-org --no-workflows --no-copilot
+
+# Provide tokens explicitly (for scripts/CI)
+vcopy myorg/myrepo target-org --auth-method pat --source-token ghp_xxx --target-token ghp_yyy
+
+# Dry run — see what would happen without doing anything
+vcopy myorg/myrepo target-org --dry-run
+```
+
+**As a GitHub Action:**
+
+```yaml
+- uses: your-org/vcopy@v1
+  with:
+    source-repo: source-org/my-repo
+    target-org: target-org
+    source-token: ${{ secrets.SOURCE_GITHUB_TOKEN }}
+    target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
+```
+
+See [GitHub Action docs](action/README.md) for full setup guide and examples.
+
+---
+
 ## Features
 
 - **Verified mirroring** of all branches, tags, and commit history
@@ -29,27 +86,17 @@ A CLI tool that copies GitHub repositories between organizations (Cloud and Ente
 
 ## Installation
 
-### From source
+The Quick Start above covers `go install`. For other methods:
 
 ```bash
-go install github.com/jaiperez/vcopy/cmd/vcopy@latest
-```
-
-### Build from source
-
-```bash
-git clone https://github.com/jaiperez/vcopy.git
+# Build from source
+git clone https://github.com/jpmicrosoft/vcopy.git
 cd vcopy
 go build -o vcopy ./cmd/vcopy
+
+# Cross-platform builds (Linux, macOS, Windows × amd64/arm64)
+make build-all   # outputs to bin/
 ```
-
-### Cross-platform builds
-
-```bash
-make build-all
-```
-
-Binaries will be in `bin/`.
 
 ## Authentication
 
@@ -120,7 +167,25 @@ vcopy myorg/myrepo target-org --all-metadata
 vcopy myorg/myrepo target-org --issues --wiki
 ```
 
-### Copy without workflows or Copilot config
+### Copy without GitHub Actions workflows
+
+When copying a repo to a different org, you may not want the source's CI/CD workflows running in the target. The `--no-workflows` flag removes the `.github/workflows/` directory after the copy:
+
+```bash
+vcopy myorg/myrepo target-org --no-workflows
+```
+
+This is especially useful when the source has workflows with secrets, environment references, or deployment steps that are specific to the source org and would fail or cause unintended side effects in the target.
+
+### Copy without Copilot instructions and skills
+
+Organizations often configure Copilot behavior with `.github/copilot-instructions.md` and `.github/copilot/` skill files. These are org-specific and usually shouldn't carry over:
+
+```bash
+vcopy myorg/myrepo target-org --no-copilot
+```
+
+### Combine workflow and Copilot exclusion
 
 ```bash
 vcopy myorg/myrepo target-org --no-workflows --no-copilot
@@ -128,8 +193,16 @@ vcopy myorg/myrepo target-org --no-workflows --no-copilot
 
 ### Exclude custom paths
 
+Use `--exclude` to remove any files or directories. Paths are comma-separated:
+
 ```bash
-vcopy myorg/myrepo target-org --exclude vendor,docs/internal --no-workflows
+vcopy myorg/myrepo target-org --exclude vendor,docs/internal,scripts/deploy.sh
+```
+
+You can combine presets and custom exclusions:
+
+```bash
+vcopy myorg/myrepo target-org --no-workflows --no-copilot --exclude vendor,docs/internal
 ```
 
 ### Verify only (no copy)
@@ -260,12 +333,6 @@ Creates a `git bundle` from each repo (a self-contained archive of all refs and 
 | `--no-copilot` | `false` | Exclude Copilot instructions and skills (`.github/copilot-instructions.md`, `.github/copilot/`) from the target |
 | `--exclude` | | Comma-separated list of additional paths to exclude from the target (e.g., `--exclude vendor,docs/internal`). Can be repeated |
 
-## Requirements
-
-- **git** must be installed and available in PATH
-- **gh** CLI (optional, for `auto` or `gh` auth methods)
-- Network access to both source and target GitHub instances
-
 ## Security
 
 - **Token input is hidden**: When entering PATs interactively, terminal echo is disabled so tokens are never visible on screen.
@@ -309,49 +376,88 @@ vcopy myorg/myrepo target-org --force
 
 ## Path Exclusion
 
-You can exclude specific files and directories from the target repository. This is useful when the source contains GitHub Actions workflows, Copilot instructions, or other org-specific configuration that shouldn't carry over.
+You can exclude specific files and directories from the target repository after copying. This is useful when the source contains GitHub Actions workflows, Copilot instructions, or other org-specific configuration that shouldn't carry over to the target.
 
-### How it works
+### Why exclude paths?
 
-vcopy first mirrors the full repository (preserving all history), then adds a **single cleanup commit** on the target's default branch that removes the excluded paths. This means:
+| Scenario | Flag | What it removes |
+|----------|------|----------------|
+| Source has CI/CD workflows that reference secrets, environments, or deploy targets specific to the source org | `--no-workflows` | `.github/workflows/` (all workflow YAML files) |
+| Source has Copilot instructions or custom skills that are org-specific | `--no-copilot` | `.github/copilot-instructions.md` and `.github/copilot/` directory |
+| Source has vendored dependencies, internal docs, or other paths you don't want in the target | `--exclude` | Any paths you specify |
 
-- **Full history is preserved** — every original commit is intact
-- **Verification still passes** — the 5-layer check compares source-to-target before the cleanup commit
-- **Transparent** — the cleanup commit is clearly labeled `vcopy: remove excluded paths`
+### How it works (step by step)
+
+Path exclusion is a **post-copy operation**. Here's exactly what happens:
+
+1. **vcopy mirrors the full repository** — all branches, tags, commits, and history are pushed to the target (this is the standard copy step, identical to running without exclusion flags)
+2. **Verification runs** — the 5-layer integrity check compares source and target to confirm nothing was lost or changed during the mirror. This happens **before** any paths are removed, so verification compares the exact mirror
+3. **vcopy shallow-clones the target** — a `--depth 1` clone of the target's default branch is made to a temp directory
+4. **Excluded paths are deleted** — `git rm -rf` removes the specified files/directories from the working tree
+5. **A cleanup commit is pushed** — a single commit with the message `vcopy: remove excluded paths` is pushed to the target's default branch. The commit message lists every path that was removed
+6. **Temp directory is cleaned up** — all temporary files are deleted
+
+```
+Source Repo                    Target Repo (after vcopy)
+┌──────────────────────┐       ┌──────────────────────┐
+│ .github/workflows/   │──────▶│ (removed by cleanup)  │
+│ .github/copilot/     │──────▶│ (removed by cleanup)  │
+│ src/                 │──────▶│ src/                  │
+│ README.md            │──────▶│ README.md             │
+│ All history          │──────▶│ All history + 1 extra │
+│                      │       │ cleanup commit        │
+└──────────────────────┘       └──────────────────────┘
+```
+
+### What this means for you
+
+- **Full git history is preserved** — every original commit, branch, and tag from the source exists in the target. The cleanup only affects the latest working tree on the default branch
+- **Verification passes** — the 5-layer check runs against the exact mirror before any paths are removed, so it compares source-to-target 1:1
+- **The cleanup is transparent** — anyone looking at the target repo can see exactly what was removed by inspecting the `vcopy: remove excluded paths` commit
+- **Excluded paths exist in history** — the files are removed from the current tree, but they still exist in older commits. If you need them scrubbed from history entirely, you'd need a separate tool like `git filter-repo`
+- **Non-existent paths are skipped** — if a path doesn't exist in the source (e.g., the repo has no `.github/workflows/`), the flag is silently ignored
 
 ### Preset flags
 
-| Flag | Paths removed |
-|------|--------------|
-| `--no-workflows` | `.github/workflows/` |
-| `--no-copilot` | `.github/copilot-instructions.md`, `.github/copilot/` |
+| Flag | Paths removed | Use case |
+|------|--------------|----------|
+| `--no-workflows` | `.github/workflows/` | Source CI/CD shouldn't run in target org |
+| `--no-copilot` | `.github/copilot-instructions.md`, `.github/copilot/` | Copilot config is org-specific |
 
-### Custom paths
+### Custom paths with `--exclude`
 
-Use `--exclude` to remove any paths. Comma-separated or repeated:
+Use `--exclude` to remove any files or directories by their repo-relative path:
 
 ```bash
+# Remove a single directory
+vcopy myorg/myrepo target-org --exclude vendor
+
+# Remove multiple paths (comma-separated)
 vcopy myorg/myrepo target-org --exclude vendor,docs/internal,scripts/deploy.sh
-```
 
-Combine presets and custom paths:
-
-```bash
+# Combine with presets
 vcopy myorg/myrepo target-org --no-workflows --no-copilot --exclude vendor
 ```
 
+**Path validation rules:**
+- Paths must be **relative** to the repository root (no leading `/`)
+- Paths must not contain `..` (directory traversal is blocked)
+- Paths must not start with `-` (flag injection is blocked)
+- Backslashes are normalised to forward slashes automatically
+
 ### Config file
+
+All exclusion flags are available in the YAML config:
 
 ```yaml
 exclude:
-  workflows: true
-  copilot: true
-  paths:
+  workflows: true   # same as --no-workflows
+  copilot: true     # same as --no-copilot
+  paths:            # same as --exclude
     - vendor
     - docs/internal
+    - scripts/deploy.sh
 ```
-
-> **Note**: Paths that don't exist in the source are silently skipped. Absolute paths and traversal (`..`) are rejected.
 
 ## Hidden Refs (refs/pull/*)
 
