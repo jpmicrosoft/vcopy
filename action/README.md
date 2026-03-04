@@ -87,9 +87,11 @@ This triggers `.github/workflows/release.yml`, which:
 | `version` | | `latest` | vcopy release version (e.g., `v1.0.0`) |
 | `upload-report` | | `false` | Upload the verification report as a workflow artifact |
 | `artifact-name` | | `vcopy-verification-report` | Name for the uploaded artifact (used with `upload-report`) |
-| `no-workflows` | | `false` | Exclude GitHub Actions workflows (`.github/workflows/`) from the target |
+| `no-workflows` | | `false` | Exclude GitHub Actions workflows and custom actions (`.github/workflows/`, `.github/actions/`) from the target |
 | `no-copilot` | | `false` | Exclude Copilot instructions/skills from the target |
 | `exclude` | | | Comma-separated paths to exclude from the target |
+
+> **Note**: `CODEOWNERS` files (`CODEOWNERS`, `.github/CODEOWNERS`, `docs/CODEOWNERS`) are **always removed** on every copy because they reference source org teams/users that won't exist in the target.
 
 ## Outputs
 

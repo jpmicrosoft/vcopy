@@ -13,15 +13,22 @@ import (
 
 // Well-known path sets for preset exclusion flags.
 var (
-	WorkflowPaths = []string{".github/workflows"}
+	WorkflowPaths = []string{".github/workflows", ".github/actions"}
 	CopilotPaths  = []string{
 		".github/copilot-instructions.md",
 		".github/copilot",
 	}
+	// CodeOwnersPaths are always removed because CODEOWNERS references
+	// teams/users that typically don't exist in the target org.
+	CodeOwnersPaths = []string{
+		"CODEOWNERS",
+		".github/CODEOWNERS",
+		"docs/CODEOWNERS",
+	}
 )
 
-// BuildExcludePaths merges preset flags and user-supplied --exclude paths into
-// a single deduplicated list. All paths are validated and sanitized.
+// BuildExcludePaths merges preset flags, user-supplied --exclude paths, and
+// always-excluded paths (CODEOWNERS) into a single deduplicated list.
 func BuildExcludePaths(noWorkflows, noCopilot bool, extraPaths []string) ([]string, error) {
 	seen := make(map[string]bool)
 	var result []string
@@ -51,6 +58,12 @@ func BuildExcludePaths(noWorkflows, noCopilot bool, extraPaths []string) ([]stri
 		}
 	}
 	if err := add(extraPaths); err != nil {
+		return nil, err
+	}
+
+	// Always remove CODEOWNERS — references source org teams/users
+	// that won't exist in the target
+	if err := add(CodeOwnersPaths); err != nil {
 		return nil, err
 	}
 
