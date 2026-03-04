@@ -105,11 +105,19 @@ inputs:
     required: false
     default: 'vcopy-verification-report'
   no-workflows:
-    description: 'Exclude GitHub Actions workflows and custom actions (.github/workflows/, .github/actions/) from the target'
+    description: 'Exclude GitHub Actions workflows (.github/workflows/) from the target'
+    required: false
+    default: 'false'
+  no-actions:
+    description: 'Exclude GitHub Actions custom actions (.github/actions/) from the target'
     required: false
     default: 'false'
   no-copilot:
     description: 'Exclude Copilot instructions and skills (.github/copilot-instructions.md, .github/copilot/) from the target'
+    required: false
+    default: 'false'
+  no-github:
+    description: 'Exclude entire .github/ directory from the target (supersedes --no-workflows, --no-actions, --no-copilot)'
     required: false
     default: 'false'
   exclude:
@@ -156,7 +164,9 @@ runs:
         INPUT_VERBOSE: ${{ inputs.verbose }}
         INPUT_VERSION: ${{ inputs.version }}
         INPUT_NO_WORKFLOWS: ${{ inputs.no-workflows }}
+        INPUT_NO_ACTIONS: ${{ inputs.no-actions }}
         INPUT_NO_COPILOT: ${{ inputs.no-copilot }}
+        INPUT_NO_GITHUB: ${{ inputs.no-github }}
         INPUT_EXCLUDE: ${{ inputs.exclude }}
         GH_TOKEN: ${{ github.token }}
       run: ${{ github.action_path }}/action/entrypoint.sh

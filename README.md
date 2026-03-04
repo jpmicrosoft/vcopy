@@ -329,8 +329,10 @@ Creates a `git bundle` from each repo (a self-contained archive of all refs and 
 | `--verbose` | `false` | Show detailed output for every step (git commands, API calls, skipped items) |
 | `--dry-run` | `false` | Show what would happen without actually copying or modifying anything |
 | `--non-interactive` | `false` | Skip confirmation prompts — required for CI/CD and automation (the GitHub Action sets this automatically) |
-| `--no-workflows` | `false` | Exclude GitHub Actions workflows and custom actions (`.github/workflows/`, `.github/actions/`) from the target |
+| `--no-workflows` | `false` | Exclude GitHub Actions workflows (`.github/workflows/`) from the target |
+| `--no-actions` | `false` | Exclude GitHub Actions custom actions (`.github/actions/`) from the target |
 | `--no-copilot` | `false` | Exclude Copilot instructions and skills (`.github/copilot-instructions.md`, `.github/copilot/`) from the target |
+| `--no-github` | `false` | Exclude entire `.github/` directory from the target (supersedes `--no-workflows`, `--no-actions`, `--no-copilot`) |
 | `--exclude` | | Comma-separated list of additional paths to exclude from the target (e.g., `--exclude vendor,docs/internal`). Can be repeated |
 
 ## Security
@@ -382,8 +384,10 @@ You can exclude specific files and directories from the target repository after 
 
 | Scenario | How it's handled |
 |----------|-----------------|
-| Source has CI/CD workflows and custom actions that reference secrets, environments, or deploy targets specific to the source org | Use `--no-workflows` — removes `.github/workflows/` and `.github/actions/` |
+| Source has CI/CD workflows that reference secrets, environments, or deploy targets specific to the source org | Use `--no-workflows` — removes `.github/workflows/` |
+| Source has custom composite actions specific to the source org | Use `--no-actions` — removes `.github/actions/` |
 | Source has Copilot instructions or custom skills that are org-specific | Use `--no-copilot` — removes `.github/copilot-instructions.md` and `.github/copilot/` |
+| You want to remove the entire `.github/` directory (issue templates, PR templates, workflows, actions, copilot, etc.) | Use `--no-github` — removes `.github/` (supersedes `--no-workflows`, `--no-actions`, `--no-copilot`) |
 | Source has vendored dependencies, internal docs, or other paths you don't want in the target | Use `--exclude` — removes any paths you specify |
 | Source has CODEOWNERS that reference teams/users from the source org | **Automatic** — `CODEOWNERS`, `.github/CODEOWNERS`, and `docs/CODEOWNERS` are always removed because they reference teams and users that won't exist in the target org. This prevents broken branch protection rules and review assignment failures |
 
@@ -428,8 +432,10 @@ Source Repo            Mirror + Verify              Target Repo (final)
 
 | Flag | Paths removed | Use case |
 |------|--------------|----------|
-| `--no-workflows` | `.github/workflows/`, `.github/actions/` | Source CI/CD and custom actions shouldn't run in target org |
+| `--no-workflows` | `.github/workflows/` | Source CI/CD workflows shouldn't run in target org |
+| `--no-actions` | `.github/actions/` | Custom composite actions are org-specific |
 | `--no-copilot` | `.github/copilot-instructions.md`, `.github/copilot/` | Copilot config is org-specific |
+| `--no-github` | `.github/` (entire directory) | Remove all GitHub config (supersedes the three flags above) |
 | *(always)* | `CODEOWNERS`, `.github/CODEOWNERS`, `docs/CODEOWNERS` | Source team/user references would break branch protection in target |
 
 ### Custom paths with `--exclude`

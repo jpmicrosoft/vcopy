@@ -13,11 +13,13 @@ import (
 
 // Well-known path sets for preset exclusion flags.
 var (
-	WorkflowPaths = []string{".github/workflows", ".github/actions"}
+	WorkflowPaths = []string{".github/workflows"}
+	ActionsPaths  = []string{".github/actions"}
 	CopilotPaths  = []string{
 		".github/copilot-instructions.md",
 		".github/copilot",
 	}
+	GitHubDirPath = []string{".github"}
 	// CodeOwnersPaths are always removed because CODEOWNERS references
 	// teams/users that typically don't exist in the target org.
 	CodeOwnersPaths = []string{
@@ -29,7 +31,9 @@ var (
 
 // BuildExcludePaths merges preset flags, user-supplied --exclude paths, and
 // always-excluded paths (CODEOWNERS) into a single deduplicated list.
-func BuildExcludePaths(noWorkflows, noCopilot bool, extraPaths []string) ([]string, error) {
+// When noGitHub is true, it supersedes noWorkflows, noActions, and noCopilot
+// since the entire .github directory is removed.
+func BuildExcludePaths(noWorkflows, noActions, noCopilot, noGitHub bool, extraPaths []string) ([]string, error) {
 	seen := make(map[string]bool)
 	var result []string
 
@@ -47,14 +51,26 @@ func BuildExcludePaths(noWorkflows, noCopilot bool, extraPaths []string) ([]stri
 		return nil
 	}
 
-	if noWorkflows {
-		if err := add(WorkflowPaths); err != nil {
+	if noGitHub {
+		// --no-github supersedes individual .github sub-path flags
+		if err := add(GitHubDirPath); err != nil {
 			return nil, err
 		}
-	}
-	if noCopilot {
-		if err := add(CopilotPaths); err != nil {
-			return nil, err
+	} else {
+		if noWorkflows {
+			if err := add(WorkflowPaths); err != nil {
+				return nil, err
+			}
+		}
+		if noActions {
+			if err := add(ActionsPaths); err != nil {
+				return nil, err
+			}
+		}
+		if noCopilot {
+			if err := add(CopilotPaths); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := add(extraPaths); err != nil {

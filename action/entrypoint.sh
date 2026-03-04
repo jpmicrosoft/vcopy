@@ -165,7 +165,9 @@ ARGS+=("--non-interactive")
 [ "${INPUT_QUICK_VERIFY}" = "true" ] && ARGS+=("--quick-verify")
 [ "${INPUT_VERBOSE}" = "true" ] && ARGS+=("--verbose")
 [ "${INPUT_NO_WORKFLOWS}" = "true" ] && ARGS+=("--no-workflows")
+[ "${INPUT_NO_ACTIONS}" = "true" ] && ARGS+=("--no-actions")
 [ "${INPUT_NO_COPILOT}" = "true" ] && ARGS+=("--no-copilot")
+[ "${INPUT_NO_GITHUB}" = "true" ] && ARGS+=("--no-github")
 [ -n "${INPUT_EXCLUDE}" ] && ARGS+=("--exclude" "${INPUT_EXCLUDE}")
 
 # ──────────────────────────────────────────────
