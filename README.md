@@ -388,25 +388,28 @@ You can exclude specific files and directories from the target repository after 
 
 ### How it works (step by step)
 
-Path exclusion is a **post-copy operation**. Here's exactly what happens:
+Path exclusion is a **post-verification operation**. Here's exactly what happens:
 
 1. **vcopy mirrors the full repository** — all branches, tags, commits, and history are pushed to the target (this is the standard copy step, identical to running without exclusion flags)
-2. **Verification runs** — the 5-layer integrity check compares source and target to confirm nothing was lost or changed during the mirror. This happens **before** any paths are removed, so verification compares the exact mirror
+2. **Verification runs** — the 5-layer integrity check compares source and target to confirm the mirror is exact. This happens **before** any paths are removed, so verification compares the 1:1 mirror
 3. **vcopy shallow-clones the target** — a `--depth 1` clone of the target's default branch is made to a temp directory
 4. **Excluded paths are deleted** — `git rm -rf` removes the specified files/directories from the working tree
 5. **A cleanup commit is pushed** — a single commit with the message `vcopy: remove excluded paths` is pushed to the target's default branch. The commit message lists every path that was removed
 6. **Temp directory is cleaned up** — all temporary files are deleted
 
 ```
-Source Repo                    Target Repo (after vcopy)
-┌──────────────────────┐       ┌──────────────────────┐
-│ .github/workflows/   │──────▶│ (removed by cleanup)  │
-│ .github/copilot/     │──────▶│ (removed by cleanup)  │
-│ src/                 │──────▶│ src/                  │
-│ README.md            │──────▶│ README.md             │
-│ All history          │──────▶│ All history + 1 extra │
-│                      │       │ cleanup commit        │
-└──────────────────────┘       └──────────────────────┘
+Source Repo            Mirror + Verify              Target Repo (final)
+┌────────────────┐     ┌────────────────┐           ┌────────────────┐
+│ .github/       │────▶│ .github/       │ ✅ PASS   │ (removed)      │
+│   workflows/   │     │   workflows/   │──verify──▶│                │
+│   copilot/     │     │   copilot/     │           │                │
+│ src/           │────▶│ src/           │           │ src/           │
+│ README.md      │────▶│ README.md      │           │ README.md      │
+│ All history    │────▶│ All history    │           │ All history +  │
+│                │     │                │           │ cleanup commit │
+└────────────────┘     └────────────────┘           └────────────────┘
+                        Step 1: mirror              Step 2: exclude
+                        Step 2: verify ✅            (after verify)
 ```
 
 ### What this means for you
