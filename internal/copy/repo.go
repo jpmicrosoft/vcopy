@@ -29,13 +29,15 @@ func sanitizeRepoName(name string) string {
 // MirrorRepo performs a bare clone from source and pushes to target.
 // forceOverwrite: uses --mirror (destructive). codeOnly: pushes only branches (no tags).
 // Default (both false): pushes branches + new tags (additive).
-func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, lfs, forceOverwrite, codeOnly, verbose bool) error {
+// Returns the list of rejected refs (e.g. "refs/heads/main") if any branches were
+// rejected by the remote due to branch protection or org rulesets.
+func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, lfs, forceOverwrite, codeOnly, verbose bool) ([]string, error) {
 	srcURL := ghclient.CloneURL(srcHost, srcOwner, srcName, srcToken)
 	tgtURL := ghclient.CloneURL(tgtHost, tgtOrg, tgtName, tgtToken)
 
 	tmpDir, err := os.MkdirTemp("", "vcopy-mirror-*")
 	if err != nil {
-		return fmt.Errorf("failed to create temp dir: %w", err)
+		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
@@ -48,7 +50,7 @@ func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 	})
 	if cloneErr != nil {
 		sp.StopFail()
-		return fmt.Errorf("bare clone failed: %w", cloneErr)
+		return nil, fmt.Errorf("bare clone failed: %w", cloneErr)
 	}
 	sp.Stop()
 
@@ -67,7 +69,7 @@ func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 		})
 		if lfsErr != nil {
 			sp.StopFail()
-			return fmt.Errorf("LFS fetch failed: %w", lfsErr)
+			return nil, fmt.Errorf("LFS fetch failed: %w", lfsErr)
 		}
 		sp.Stop()
 	} else {
@@ -79,6 +81,7 @@ func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 	}
 
 	// Push to target
+	var rejectedRefs []string
 	sp = progress.Start(fmt.Sprintf("Pushing to %s/%s/%s...", tgtHost, tgtOrg, tgtName))
 	if forceOverwrite {
 		// Destructive: replace everything in target
@@ -87,22 +90,24 @@ func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 		})
 		if pushErr != nil {
 			sp.StopFail()
-			return fmt.Errorf("mirror push failed: %w", pushErr)
+			return nil, fmt.Errorf("mirror push failed: %w", pushErr)
 		}
 	} else if codeOnly {
 		// Code only: push branches, skip tags entirely
-		pushErr := pushBranchesWithForce(verbose, srcToken, tgtToken, &mirrorPath, tgtURL)
+		rejected, pushErr := pushBranchesWithForce(verbose, srcToken, tgtToken, &mirrorPath, tgtURL)
 		if pushErr != nil {
 			sp.StopFail()
-			return fmt.Errorf("push branches failed: %w", pushErr)
+			return nil, fmt.Errorf("push branches failed: %w", pushErr)
 		}
+		rejectedRefs = rejected
 	} else {
 		// Additive: force-update branches, push new tags (existing tags preserved)
-		pushErr := pushBranchesWithForce(verbose, srcToken, tgtToken, &mirrorPath, tgtURL)
+		rejected, pushErr := pushBranchesWithForce(verbose, srcToken, tgtToken, &mirrorPath, tgtURL)
 		if pushErr != nil {
 			sp.StopFail()
-			return fmt.Errorf("push branches failed: %w", pushErr)
+			return nil, fmt.Errorf("push branches failed: %w", pushErr)
 		}
+		rejectedRefs = rejected
 		// Push tags without overwriting existing ones
 		tagErr := retry.Do(retry.Default(), "git push tags", func() error {
 			return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--tags", tgtURL)
@@ -123,12 +128,12 @@ func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 		})
 		if lfsPushErr != nil {
 			sp.StopFail()
-			return fmt.Errorf("LFS push failed: %w", lfsPushErr)
+			return nil, fmt.Errorf("LFS push failed: %w", lfsPushErr)
 		}
 		sp.Stop()
 	}
 
-	return nil
+	return rejectedRefs, nil
 }
 
 // CopyWiki clones and pushes the wiki repository.
@@ -246,11 +251,12 @@ func runGitCmdOutput(verbose bool, srcToken, tgtToken string, dir *string, args 
 
 // pushBranchesWithForce pushes all branches with --force. If the remote rejects
 // specific refs (e.g., branch protection/rulesets), those are warned about while
-// non-rejected branches are considered successfully pushed.
-func pushBranchesWithForce(verbose bool, srcToken, tgtToken string, mirrorPath *string, tgtURL string) error {
+// non-rejected branches are considered successfully pushed. Returns the full ref
+// names of rejected branches (e.g. "refs/heads/main").
+func pushBranchesWithForce(verbose bool, srcToken, tgtToken string, mirrorPath *string, tgtURL string) ([]string, error) {
 	stderr, err := runGitCmdOutput(verbose, srcToken, tgtToken, mirrorPath, "push", "--all", "--force", tgtURL)
 	if err == nil {
-		return nil
+		return nil, nil
 	}
 	if isPartialRemoteRejection(stderr) {
 		refs := extractRejectedRefs(stderr)
@@ -258,12 +264,18 @@ func pushBranchesWithForce(verbose bool, srcToken, tgtToken string, mirrorPath *
 		for _, ref := range refs {
 			fmt.Printf("    - %s\n", ref)
 		}
-		return nil
+		// Convert branch names to full ref format for verification exclusion
+		var fullRefs []string
+		for _, ref := range refs {
+			fullRefs = append(fullRefs, "refs/heads/"+ref)
+		}
+		return fullRefs, nil
 	}
 	// Transient error — retry with standard logic
-	return retry.Do(retry.Default(), "git push", func() error {
+	retryErr := retry.Do(retry.Default(), "git push", func() error {
 		return runGitCmd(verbose, srcToken, tgtToken, mirrorPath, "push", "--all", "--force", tgtURL)
 	})
+	return nil, retryErr
 }
 
 // isPartialRemoteRejection checks if push stderr indicates specific refs were

@@ -7,7 +7,7 @@ import (
 )
 
 // VerifyTrees compares root tree hashes for each branch between source and target.
-func VerifyTrees(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, verbose bool) (*CheckResult, error) {
+func VerifyTrees(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, opts Options) (*CheckResult, error) {
 	result := &CheckResult{
 		Name:   "Tree Hash Comparison",
 		Status: StatusPass,
@@ -29,7 +29,7 @@ func VerifyTrees(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken,
 	}
 	defer tgtCleanup()
 
-	// Get branch names from source
+	// Get branch names from source, filtering out excluded refs
 	branches, err := listBranches(srcPath)
 	if err != nil {
 		result.Status = StatusFail
@@ -37,13 +37,21 @@ func VerifyTrees(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken,
 		return result, nil
 	}
 
-	var mismatches int
-	total := len(branches)
-
+	excluded := buildExcludedSet(opts.ExcludedRefs)
+	var filteredBranches []string
 	for _, branch := range branches {
+		if !excluded["refs/heads/"+branch] {
+			filteredBranches = append(filteredBranches, branch)
+		}
+	}
+
+	var mismatches int
+	total := len(filteredBranches)
+
+	for _, branch := range filteredBranches {
 		srcTree, err := getTreeHash(srcPath, branch)
 		if err != nil {
-			if verbose {
+			if opts.Verbose {
 				fmt.Printf("  Warning: could not get tree hash for source branch %s: %v\n", branch, err)
 			}
 			continue
@@ -52,7 +60,7 @@ func VerifyTrees(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken,
 		tgtTree, err := getTreeHash(tgtPath, branch)
 		if err != nil {
 			mismatches++
-			if verbose {
+			if opts.Verbose {
 				fmt.Printf("  MISSING: branch %s not found in target\n", branch)
 			}
 			continue
@@ -60,15 +68,19 @@ func VerifyTrees(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken,
 
 		if srcTree != tgtTree {
 			mismatches++
-			if verbose {
+			if opts.Verbose {
 				fmt.Printf("  MISMATCH: branch %s source_tree=%s target_tree=%s\n", branch, srcTree, tgtTree)
 			}
 		}
 	}
 
+	excludedCount := len(branches) - len(filteredBranches)
 	if mismatches > 0 {
 		result.Status = StatusFail
 		result.Details = fmt.Sprintf("%d tree hash mismatches out of %d branches", mismatches, total)
+	} else if excludedCount > 0 {
+		result.Status = StatusWarn
+		result.Details = fmt.Sprintf("All %d checked branch tree hashes match (%d branches excluded — rejected by remote)", total, excludedCount)
 	} else {
 		result.Details = fmt.Sprintf("All %d branch tree hashes match", total)
 	}

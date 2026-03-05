@@ -297,10 +297,12 @@ After copying, vcopy runs **5 independent checks** to cryptographically prove no
 
 > In `--code-only` mode, checks 1 and 5 are skipped (they depend on tags). The remaining 3 checks still verify branch integrity.
 
+> **WARN status — rejected branches:** When the target remote rejects specific branches during push (e.g., due to org rulesets or branch protection rules), vcopy automatically excludes those branches from verification and reports **WARN** instead of FAIL. This means all successfully pushed content was verified, but some source branches could not be pushed. Rejected branches are listed in the push output.
+
 ## Verification Technical Details
 
 ### 1. Branch/Tag Ref Comparison
-Uses `git ls-remote` on both source and target to enumerate all `refs/heads/*` and `refs/tags/*`. Compares the SHA-1/SHA-256 commit hash each ref points to. Detects missing refs, extra refs, or refs pointing to different commits. GitHub's hidden `refs/pull/*` are excluded (see [Hidden Refs](#hidden-refs-refspull)).
+Uses `git ls-remote` on both source and target to enumerate all `refs/heads/*` and `refs/tags/*`. Compares the SHA-1/SHA-256 commit hash each ref points to. Detects missing refs, extra refs, or refs pointing to different commits. GitHub's hidden `refs/pull/*` are excluded (see [Hidden Refs](#hidden-refs-refspull)). Branches rejected by the remote during push (due to branch protection or org rulesets) are automatically excluded from comparison and cause a WARN result.
 
 ### 2. Git Object Hash Verification
 Clones both repos bare, then runs `git rev-list --objects --all` to enumerate every reachable object (commits, trees, blobs). Each object's SHA hash is its content-addressable identity — if even a single byte differs, the hash changes. All source object hashes are checked against the target to confirm a 1:1 match.
@@ -728,6 +730,9 @@ Ensure your token has the `repo` scope. For public source repos, use `--public-s
 
 **"Must have admin rights to Repository" when using `--force`.**
 Your target token needs admin-level access to the target repo. For organization-owned repos, ensure the token has `repo` scope and the user is an org owner or has admin role on the repo.
+
+**Verification shows WARN instead of PASS.**
+This means some branches were rejected by the target during push — typically because of org rulesets or branch protection rules that prevent force-pushes. vcopy automatically excludes rejected branches from verification so they don't cause false failures. The WARN indicates all successfully pushed content was verified, but not all source branches made it to the target. Check the push output to see which branches were rejected.
 
 **Verification fails on `refs/pull/*` refs.**
 GitHub creates hidden `refs/pull/*` refs for pull requests. These are read-only and cannot be pushed. vcopy automatically excludes them during verification — if you see failures, ensure you're on the latest version.

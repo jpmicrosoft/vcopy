@@ -255,6 +255,8 @@ if err != nil {
 return err
 }
 
+var rejectedRefs []string
+
 if !verifyOnly {
 fmt.Printf("Creating target repository %s/%s on %s (visibility: %s)...\n", targetOrg, repoName, targetHost, targetVisibility)
 
@@ -294,7 +296,8 @@ return fmt.Errorf("failed to create target repo: %w", err)
 }
 
 fmt.Printf("Mirroring %s/%s from %s to %s/%s on %s...\n", srcOwner, srcName, sourceHost, targetOrg, repoName, targetHost)
-if err := vcopy.MirrorRepo(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, lfs, forceOverwrite, codeOnly, verbose); err != nil {
+rejectedRefs, err = vcopy.MirrorRepo(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, lfs, forceOverwrite, codeOnly, verbose)
+if err != nil {
 return fmt.Errorf("mirror failed: %w", err)
 }
 
@@ -351,9 +354,10 @@ fmt.Println("\n=== Running Integrity Verification ===")
 
 var results *verify.VerificationReport
 opts := verify.Options{
-QuickMode: quickVerify,
-CodeOnly:  codeOnly,
-Verbose:   verbose,
+QuickMode:    quickVerify,
+CodeOnly:     codeOnly,
+Verbose:      verbose,
+ExcludedRefs: rejectedRefs,
 }
 if since != "" {
 results, err = verify.RunIncremental(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, since, opts)
@@ -688,7 +692,8 @@ func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targe
 	}
 
 	// Mirror
-	if err := vcopy.MirrorRepo(sourceHost, srcOwner, srcName, targetHost, targetOrg, targetRepoName, srcToken, tgtToken, lfs, false, codeOnly, verbose); err != nil {
+	rejectedRefs, err := vcopy.MirrorRepo(sourceHost, srcOwner, srcName, targetHost, targetOrg, targetRepoName, srcToken, tgtToken, lfs, false, codeOnly, verbose)
+	if err != nil {
 		return nil, fmt.Errorf("mirror: %w", err)
 	}
 
@@ -703,9 +708,10 @@ func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targe
 	var results *verify.VerificationReport
 	if !skipVerify {
 		opts := verify.Options{
-			QuickMode: quickVerify,
-			CodeOnly:  codeOnly,
-			Verbose:   verbose,
+			QuickMode:    quickVerify,
+			CodeOnly:     codeOnly,
+			Verbose:      verbose,
+			ExcludedRefs: rejectedRefs,
 		}
 		var err error
 		results, err = verify.RunAll(sourceHost, srcOwner, srcName, targetHost, targetOrg, targetRepoName, srcToken, tgtToken, opts)
