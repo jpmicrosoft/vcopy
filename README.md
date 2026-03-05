@@ -82,7 +82,7 @@ See the [Action documentation](action/README.md) for full setup and examples.
 | **Reporting** | JSON verification reports. In batch mode: combined report + optional per-repo reports. |
 | **LFS** | `--lfs` includes Git LFS objects (auto-detects and warns). |
 | **Auth** | Auto-detects `gh` CLI tokens, falls back to PAT. `--public-source` for open-source repos. |
-| **Resilience** | Automatic retry with exponential backoff on network/API failures. |
+| **Resilience** | Automatic retry with exponential backoff on network/API failures. Auto-retry on GitHub rate limit 403s (sleeps until reset). |
 | **Config** | YAML config file (`--config`) for repeatable setups. |
 | **Cross-platform** | Single binary for Windows, macOS, Linux (amd64 + arm64). |
 | **Action** | Reusable GitHub Action with all CLI capabilities. |
@@ -281,6 +281,8 @@ vcopy large-org/big-repo my-org --public-source --issues --source-token ghp_xxx
 
 The `--public-source` flag controls whether source auth is *required* — you can always optionally provide a `--source-token` alongside it for better rate limits on metadata operations.
 
+> **Note:** All API calls (authenticated or not) automatically retry on rate limit 403 responses by sleeping until the reset time. With unauthenticated access, this means metadata operations may pause frequently but will complete rather than fail. See [Retry Behavior](#retry-behavior) for details.
+
 ## Integrity Verification
 
 After copying, vcopy runs **5 independent checks** to cryptographically prove nothing was lost or altered in transit:
@@ -293,9 +295,11 @@ After copying, vcopy runs **5 independent checks** to cryptographically prove no
 | 4 | **Commit Signatures** | GPG/SSH signatures on commits survived the transfer |
 | 5 | **Bundle Integrity** | Both repos produce structurally valid, equivalent git bundles |
 
-**All 5 pass → cryptographic proof the copy is identical.** If any fail, the report tells you exactly what differs.
+**All 5 pass → cryptographic proof the copy is identical.** If any check reports WARN, all source content was verified but the target contains additional content or excluded refs. If any check reports FAIL, the report tells you exactly what differs.
 
 > In `--code-only` mode, checks 1 and 5 are skipped (they depend on tags). The remaining 3 checks still verify branch integrity.
+
+> **WARN status — extra target content (additive mode):** In additive mode (the default), the target may contain branches, tags, objects, or refs from prior copy runs or manual commits that don't exist in the source. These extras are reported as **WARN**, not FAIL, because they don't indicate data loss — all source content is still present. Only *missing* source content in the target causes FAIL.
 
 > **WARN status — rejected branches:** When the target remote rejects specific branches during push (e.g., due to org rulesets or branch protection rules), vcopy automatically excludes those branches from verification and reports **WARN** instead of FAIL. This means all successfully pushed content was verified, but some source branches could not be pushed. Rejected branches are listed in the push output.
 
@@ -305,7 +309,7 @@ After copying, vcopy runs **5 independent checks** to cryptographically prove no
 Uses `git ls-remote` on both source and target to enumerate all `refs/heads/*` and `refs/tags/*`. Compares the SHA-1/SHA-256 commit hash each ref points to. Detects missing refs, extra refs, or refs pointing to different commits. GitHub's hidden `refs/pull/*` are excluded (see [Hidden Refs](#hidden-refs-refspull)). Branches rejected by the remote during push (due to branch protection or org rulesets) are automatically excluded from comparison and cause a WARN result.
 
 ### 2. Git Object Hash Verification
-Clones both repos bare, then runs `git rev-list --objects --all` to enumerate every reachable object (commits, trees, blobs). Each object's SHA hash is its content-addressable identity — if even a single byte differs, the hash changes. All source object hashes are checked against the target to confirm a 1:1 match.
+Clones both repos bare, then runs `git rev-list --objects --all` to enumerate every reachable object (commits, trees, blobs). Each object's SHA hash is its content-addressable identity — if even a single byte differs, the hash changes. All source object hashes must be present in the target (missing source objects = FAIL). Extra objects in the target (from prior runs or cleanup commits in additive mode) produce a WARN, not a failure.
 
 ### 3. Tree Hash Comparison
 For each branch head, computes `git rev-parse <branch>^{tree}` on both repos. The tree hash is a recursive hash of the entire directory structure at that branch tip — file names, permissions, and content hashes. If the tree hashes match, the working directories are byte-for-byte identical.
@@ -314,7 +318,7 @@ For each branch head, computes `git rev-parse <branch>^{tree}` on both repos. Th
 Uses `git log --all --format=%H %G?` on both repos to enumerate all commits and their signature status (Good, Bad, None, etc.). Compares the set of signed commit SHAs to ensure no signatures were dropped or corrupted during the mirror. Reports as a warning (not failure) if signatures differ, since some transfer methods may strip them.
 
 ### 5. Bundle Integrity Verification
-Creates a `git bundle` from each repo (a self-contained archive of all refs and objects). Verifies each bundle passes `git bundle verify` (structural integrity). Then compares the refs listed inside each bundle using `git bundle list-heads` to confirm they match. SHA-256 checksums of each bundle file are included in the report for audit purposes, but are not compared directly because git bundle packing is non-deterministic.
+Creates a `git bundle` from each repo (a self-contained archive of all refs and objects). Verifies each bundle passes `git bundle verify` (structural integrity). Then compares the refs listed inside each bundle using `git bundle list-heads` — all source bundle refs must be present with matching SHAs in the target bundle (missing or mismatched = FAIL). Extra refs in the target bundle (from prior runs in additive mode) produce a WARN. SHA-256 checksums of each bundle file are included in the report for audit purposes, but are not compared directly because git bundle packing is non-deterministic.
 
 ## Flags Reference
 
@@ -393,6 +397,8 @@ vcopy myorg/myrepo target-org --force
 ```
 
 > ⚠️ **WARNING**: `--force` will **permanently delete** any branches, tags, or commits in the target that do not exist in the source. This cannot be undone.
+
+> **Verification in additive mode:** Because the target may contain extra content from prior runs (preserved branches, tags, objects), verification tolerates these extras and reports **WARN** rather than FAIL. Only missing source content in the target causes a failure. See [Integrity Verification](#integrity-verification).
 
 ## Path Exclusion
 
@@ -695,6 +701,8 @@ vcopy automatically retries failed git operations and API calls with exponential
 - **Initial wait**: 1 second
 - **Max wait**: 30 seconds
 
+In addition, all GitHub API calls automatically handle **rate limit 403 responses**. When a request receives a `403` with `X-RateLimit-Remaining: 0`, vcopy sleeps until the `X-RateLimit-Reset` time (plus a small buffer) and retries — up to 3 times per request, with a maximum single wait of 2 minutes. This applies to both authenticated and unauthenticated (`--public-source`) clients, so even with the 60 req/hr unauthenticated limit, operations will pause and resume rather than fail.
+
 This handles transient network failures and GitHub API rate limits gracefully.
 
 ## GitHub Action
@@ -732,7 +740,11 @@ Ensure your token has the `repo` scope. For public source repos, use `--public-s
 Your target token needs admin-level access to the target repo. For organization-owned repos, ensure the token has `repo` scope and the user is an org owner or has admin role on the repo.
 
 **Verification shows WARN instead of PASS.**
-This means some branches were rejected by the target during push — typically because of org rulesets or branch protection rules that prevent force-pushes. vcopy automatically excludes rejected branches from verification so they don't cause false failures. The WARN indicates all successfully pushed content was verified, but not all source branches made it to the target. Check the push output to see which branches were rejected.
+WARN can occur for two reasons:
+1. **Extra target content (additive mode):** The target contains branches, objects, or refs from prior copy runs that don't exist in the source. This is expected in additive mode and does not indicate data loss — all source content was verified as present.
+2. **Rejected branches:** Some branches were rejected by the target during push — typically because of org rulesets or branch protection rules. vcopy automatically excludes rejected branches from verification so they don't cause false failures.
+
+In both cases, WARN means all source content that was expected in the target was verified successfully.
 
 **Verification fails on `refs/pull/*` refs.**
 GitHub creates hidden `refs/pull/*` refs for pull requests. These are read-only and cannot be pushed. vcopy automatically excludes them during verification — if you see failures, ensure you're on the latest version.

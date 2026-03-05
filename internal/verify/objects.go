@@ -84,25 +84,25 @@ func VerifyObjects(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToke
 		}
 	}
 
-	if len(missingSrc) > 0 || len(extraTgt) > 0 {
+	// Missing source objects in target = integrity problem (FAIL).
+	// Extra target objects = expected in additive mode (prior runs, cleanup commits) → WARN.
+	if len(missingSrc) > 0 {
 		result.Status = StatusFail
 		var details strings.Builder
-		if len(missingSrc) > 0 {
-			details.WriteString(fmt.Sprintf("%d objects in source missing from target", len(missingSrc)))
-			if opts.Verbose {
-				sort.Strings(missingSrc)
-				for _, obj := range missingSrc[:min(10, len(missingSrc))] {
-					fmt.Printf("  MISSING: %s\n", obj)
-				}
+		details.WriteString(fmt.Sprintf("%d objects in source missing from target", len(missingSrc)))
+		if opts.Verbose {
+			sort.Strings(missingSrc)
+			for _, obj := range missingSrc[:min(10, len(missingSrc))] {
+				fmt.Printf("  MISSING: %s\n", obj)
 			}
 		}
 		if len(extraTgt) > 0 {
-			if details.Len() > 0 {
-				details.WriteString("; ")
-			}
-			details.WriteString(fmt.Sprintf("%d extra objects in target", len(extraTgt)))
+			details.WriteString(fmt.Sprintf("; %d extra objects in target (expected — prior runs or cleanup commits)", len(extraTgt)))
 		}
 		result.Details = details.String()
+	} else if len(extraTgt) > 0 {
+		result.Status = StatusWarn
+		result.Details = fmt.Sprintf("All %d source objects present in target; %d extra objects in target (expected — prior runs or cleanup commits)", len(srcObjects), len(extraTgt))
 	} else if len(opts.ExcludedRefs) > 0 {
 		result.Status = StatusWarn
 		result.Details = fmt.Sprintf("All %d objects match (%d refs excluded — rejected by remote)", len(srcObjects), len(opts.ExcludedRefs))

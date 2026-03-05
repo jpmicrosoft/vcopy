@@ -36,15 +36,18 @@ func VerifyBundle(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken
 	}
 
 	// Compare bundle refs (deterministic) rather than raw checksums (non-deterministic)
-	var mismatches int
+	// Missing or mismatched source refs in target = integrity problem (FAIL).
+	// Extra target refs = expected in additive mode (prior runs) → tracked separately.
+	var srcMissing, srcMismatch int
+	var extraTgt int
 	for ref, srcSHA := range srcRefs {
 		if tgtSHA, ok := tgtRefs[ref]; !ok {
-			mismatches++
+			srcMissing++
 			if opts.Verbose {
 				fmt.Printf("  MISSING in target bundle: %s\n", ref)
 			}
 		} else if srcSHA != tgtSHA {
-			mismatches++
+			srcMismatch++
 			if opts.Verbose {
 				fmt.Printf("  MISMATCH: %s source=%s target=%s\n", ref, srcSHA, tgtSHA)
 			}
@@ -52,7 +55,7 @@ func VerifyBundle(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken
 	}
 	for ref := range tgtRefs {
 		if _, ok := srcRefs[ref]; !ok {
-			mismatches++
+			extraTgt++
 			if opts.Verbose {
 				fmt.Printf("  EXTRA in target bundle: %s\n", ref)
 			}
@@ -60,12 +63,21 @@ func VerifyBundle(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken
 	}
 
 	excludedCount := len(opts.ExcludedRefs)
-	if mismatches > 0 {
+	integrityIssues := srcMissing + srcMismatch
+	if integrityIssues > 0 {
 		result.Status = StatusFail
-		result.Details = fmt.Sprintf("Bundle ref mismatches: %d (source SHA-256: %s, target SHA-256: %s)", mismatches, srcChecksum, tgtChecksum)
-	} else if excludedCount > 0 {
+		result.Details = fmt.Sprintf("Bundle ref mismatches: %d (%d missing, %d SHA mismatch) (source SHA-256: %s, target SHA-256: %s)", integrityIssues, srcMissing, srcMismatch, srcChecksum, tgtChecksum)
+	} else if extraTgt > 0 || excludedCount > 0 {
 		result.Status = StatusWarn
-		result.Details = fmt.Sprintf("Both bundles valid, all %d checked refs match (%d refs excluded — rejected by remote) (source: %s, target: %s)", len(srcRefs), excludedCount, srcChecksum[:12], tgtChecksum[:12])
+		var parts []string
+		parts = append(parts, fmt.Sprintf("Both bundles valid, all %d source refs match", len(srcRefs)))
+		if extraTgt > 0 {
+			parts = append(parts, fmt.Sprintf("%d extra refs in target (expected — prior runs or cleanup commits)", extraTgt))
+		}
+		if excludedCount > 0 {
+			parts = append(parts, fmt.Sprintf("%d refs excluded — rejected by remote", excludedCount))
+		}
+		result.Details = strings.Join(parts, "; ") + fmt.Sprintf(" (source: %s, target: %s)", srcChecksum[:12], tgtChecksum[:12])
 	} else {
 		result.Details = fmt.Sprintf("Both bundles valid, all %d refs match (source: %s, target: %s)", len(srcRefs), srcChecksum[:12], tgtChecksum[:12])
 	}
