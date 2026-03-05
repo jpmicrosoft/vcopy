@@ -82,7 +82,7 @@ See the [Action documentation](action/README.md) for full setup and examples.
 | **Reporting** | JSON verification reports. In batch mode: combined report + optional per-repo reports. |
 | **LFS** | `--lfs` includes Git LFS objects (auto-detects and warns). |
 | **Auth** | Auto-detects `gh` CLI tokens, falls back to PAT. `--public-source` for open-source repos. |
-| **Resilience** | Automatic retry with exponential backoff on network/API failures. Auto-retry on GitHub rate limit 403s (sleeps until reset). |
+| **Resilience** | Automatic retry with exponential backoff on network/API failures. Auto-retry on GitHub rate limits — 403s (primary) and 429s (secondary/abuse) — sleeps until reset. |
 | **Config** | YAML config file (`--config`) for repeatable setups. |
 | **Cross-platform** | Single binary for Windows, macOS, Linux (amd64 + arm64). |
 | **Action** | Reusable GitHub Action with all CLI capabilities. |
@@ -281,7 +281,7 @@ vcopy large-org/big-repo my-org --public-source --issues --source-token ghp_xxx
 
 The `--public-source` flag controls whether source auth is *required* — you can always optionally provide a `--source-token` alongside it for better rate limits on metadata operations.
 
-> **Note:** All API calls (authenticated or not) automatically retry on rate limit 403 responses by sleeping until the reset time. With unauthenticated access, this means metadata operations may pause frequently but will complete rather than fail. See [Retry Behavior](#retry-behavior) for details.
+> **Note:** All API calls (authenticated or not) automatically retry on rate limit responses (403 primary and 429 secondary/abuse) by sleeping until the reset time. With unauthenticated access, this means metadata operations may pause frequently but will complete rather than fail. See [Retry Behavior](#retry-behavior) for details.
 
 ## Integrity Verification
 
@@ -575,9 +575,47 @@ Target repo names follow the pattern `{prefix}{source-name}{suffix}`:
 - **Sequential execution**: Repos are copied one at a time (rate-limit friendly)
 - **Error handling**: If one repo fails, the batch skips it and continues to the next
 - **Progress**: Prints `[N/total] Copying repo-name...` for each repo
-- **Summary**: At the end, prints a report of succeeded/failed/skipped counts
+- **Summary**: At the end, prints a report of succeeded/failed/skipped counts (plus releases-skipped if any were skipped due to rate limits)
 - **Resumable**: Use `--skip-existing` to skip repos already created (e.g., after a partial run)
 - **Reporting**: Use `--report` to write a combined JSON report; add `--per-repo-report` for individual files per repo
+
+#### Batch Report JSON Schema
+
+The combined batch report (`--report`) has this structure:
+
+```json
+{
+  "source_org": "Azure",
+  "target_org": "my-backup-org",
+  "source_host": "github.com",
+  "target_host": "github.com",
+  "search_filter": "terraform-azurerm-avm-",
+  "timestamp": "2025-07-15T12:00:00Z",
+  "summary": {
+    "total": 10,
+    "succeeded": 8,
+    "failed": 1,
+    "skipped": 1,
+    "releases_skipped": 2
+  },
+  "repos": [
+    {
+      "source_repo": "Azure/terraform-azurerm-avm-res-cache-redis",
+      "target_repo": "my-backup-org/terraform-azurerm-avm-res-cache-redis",
+      "status": "succeeded",
+      "checks": [ ]
+    }
+  ]
+}
+```
+
+| Summary Field | Description |
+|---------------|-------------|
+| `total` | Total number of repos in the batch |
+| `succeeded` | Repos that copied and verified successfully |
+| `failed` | Repos that encountered errors during copy |
+| `skipped` | Repos skipped (e.g., already existed with `--skip-existing`) |
+| `releases_skipped` | Repos whose releases were skipped due to rate-limit exhaustion (omitted when 0) |
 
 ## Hidden Refs (refs/pull/*)
 
@@ -701,7 +739,11 @@ vcopy automatically retries failed git operations and API calls with exponential
 - **Initial wait**: 1 second
 - **Max wait**: 30 seconds
 
-In addition, all GitHub API calls automatically handle **rate limit 403 responses**. When a request receives a `403` with `X-RateLimit-Remaining: 0`, vcopy sleeps until the `X-RateLimit-Reset` time (plus a small buffer) and retries — up to 3 times per request, with a maximum single wait of 2 minutes. This applies to both authenticated and unauthenticated (`--public-source`) clients, so even with the 60 req/hr unauthenticated limit, operations will pause and resume rather than fail.
+In addition, all GitHub API calls automatically handle **rate limit responses**:
+- **Primary rate limit (403):** When a request receives a `403` with `X-RateLimit-Remaining: 0`, vcopy sleeps until the `X-RateLimit-Reset` time (plus a 5-second buffer) and retries.
+- **Secondary/abuse rate limit (429):** When a request receives a `429 Too Many Requests`, vcopy reads the `Retry-After` header and sleeps for that duration (plus a 2-second buffer). If no `Retry-After` header is present, it waits 60 seconds.
+
+Both types retry up to 3 times per request, with a maximum single wait of 2 minutes. This applies to both authenticated and unauthenticated (`--public-source`) clients, so even with the 60 req/hr unauthenticated limit, operations will pause and resume rather than fail.
 
 This handles transient network failures and GitHub API rate limits gracefully.
 

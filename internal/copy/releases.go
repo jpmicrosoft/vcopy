@@ -102,6 +102,9 @@ func syncReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRep
 
 		created, err := tgt.CreateRelease(tgtOwner, tgtRepo, newRelease)
 		if err != nil {
+			if ghclient.IsRateLimitError(err) {
+				return fmt.Errorf("rate limited during release copy: %w", err)
+			}
 			if verbose {
 				fmt.Printf("  Warning: failed to create release %s: %v\n", rel.GetTagName(), err)
 			}
@@ -111,6 +114,9 @@ func syncReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRep
 		// Copy release assets
 		assets, err := src.ListReleaseAssets(srcOwner, srcRepo, rel.GetID())
 		if err != nil {
+			if ghclient.IsRateLimitError(err) {
+				return fmt.Errorf("rate limited during asset listing: %w", err)
+			}
 			if verbose {
 				fmt.Printf("  Warning: failed to list assets for release %s: %v\n", rel.GetTagName(), err)
 			}
@@ -124,6 +130,9 @@ func syncReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRep
 
 			resp, err := src.DownloadReleaseAsset(srcOwner, srcRepo, asset.GetID())
 			if err != nil {
+				if ghclient.IsRateLimitError(err) {
+					return fmt.Errorf("rate limited during asset download: %w", err)
+				}
 				if verbose {
 					fmt.Printf("    Warning: failed to download asset %s: %v\n", asset.GetName(), err)
 				}
@@ -140,6 +149,9 @@ func syncReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRep
 			}
 			if err := tgt.UploadReleaseAsset(tgtOwner, tgtRepo, created.GetID(), asset.GetName(), uploadFile); err != nil {
 				uploadFile.Cleanup()
+				if ghclient.IsRateLimitError(err) {
+					return fmt.Errorf("rate limited during asset upload: %w", err)
+				}
 				if verbose {
 					fmt.Printf("    Warning: failed to upload asset %s: %v\n", asset.GetName(), err)
 				}
