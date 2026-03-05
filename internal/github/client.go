@@ -29,8 +29,9 @@ func NewClient(host, token string) (*Client, error) {
 	if token != "" {
 		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 		httpClient = oauth2.NewClient(ctx, ts)
+		httpClient.Timeout = 5 * time.Minute
 	} else {
-		httpClient = &http.Client{}
+		httpClient = &http.Client{Timeout: 5 * time.Minute}
 	}
 
 	var client *gh.Client
@@ -251,14 +252,37 @@ func (c *Client) DownloadReleaseAsset(owner, repo string, assetID int64) (*http.
 		}
 		// Block private/internal hostnames
 		host := parsedURL.Hostname()
+		if host == "localhost" {
+			return nil, fmt.Errorf("redirect to localhost blocked for asset %d", assetID)
+		}
 		if ip := net.ParseIP(host); ip != nil {
 			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
 				return nil, fmt.Errorf("redirect to private/internal network blocked for asset %d", assetID)
 			}
-		} else if host == "localhost" {
-			return nil, fmt.Errorf("redirect to localhost blocked for asset %d", assetID)
 		}
-		client := &http.Client{Timeout: 10 * time.Minute}
+		// Use a custom dialer that validates resolved IPs to prevent DNS rebinding
+		safeDialer := &net.Dialer{Timeout: 30 * time.Second}
+		client := &http.Client{
+			Timeout: 10 * time.Minute,
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					dialHost, port, err := net.SplitHostPort(addr)
+					if err != nil {
+						return nil, err
+					}
+					ips, err := net.LookupIP(dialHost)
+					if err != nil {
+						return nil, err
+					}
+					for _, ip := range ips {
+						if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+							return nil, fmt.Errorf("DNS resolved to private/internal IP %s — blocked for SSRF protection", ip)
+						}
+					}
+					return safeDialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+				},
+			},
+		}
 		resp, err := client.Get(redirectURL)
 		if err != nil {
 			return nil, fmt.Errorf("download request failed for asset %d: %w", assetID, err)

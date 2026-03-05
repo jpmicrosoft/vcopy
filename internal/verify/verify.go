@@ -20,6 +20,20 @@ func sanitizeRepoName(name string) string {
 	return name
 }
 
+// sanitizeError redacts tokens from error messages to prevent credential leakage in logs.
+func sanitizeError(err error, tokens ...string) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	for _, tok := range tokens {
+		if tok != "" {
+			msg = strings.ReplaceAll(msg, tok, "[REDACTED]")
+		}
+	}
+	return fmt.Errorf("%s", msg)
+}
+
 // Status constants for verification checks.
 const (
 	StatusPass = "PASS"

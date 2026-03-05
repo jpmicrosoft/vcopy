@@ -113,7 +113,7 @@ func listRemoteRefs(host, owner, repo, token string) (map[string]string, error) 
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("git ls-remote failed: %w", err)
+		return nil, fmt.Errorf("git ls-remote failed: %w", sanitizeError(err, token))
 	}
 
 	refs := make(map[string]string)
@@ -149,11 +149,14 @@ func cloneBareTmp(host, owner, repo, token, prefix string) (string, func(), erro
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if err := cmd.Run(); err != nil {
 		os.RemoveAll(tmpDir)
-		return "", nil, fmt.Errorf("bare clone failed: %w", err)
+		return "", nil, fmt.Errorf("bare clone failed: %w", sanitizeError(err, token))
 	}
 
 	// Remove hidden refs (refs/pull/*) so verification comparisons are accurate
-	removeHiddenRefsFromClone(repoPath)
+	if err := removeHiddenRefsFromClone(repoPath); err != nil {
+		os.RemoveAll(tmpDir)
+		return "", nil, fmt.Errorf("hidden ref cleanup failed: %w", err)
+	}
 
 	cleanup := func() { os.RemoveAll(tmpDir) }
 	return repoPath, cleanup, nil

@@ -48,8 +48,8 @@ No setup required — the action is publicly available from the GitHub Marketpla
 | `pull-requests` | | `false` | Copy pull requests (as issues) |
 | `wiki` | | `false` | Copy the wiki |
 | `all-metadata` | | `false` | Copy all metadata (issues, PRs, wiki) |
-| `verify-only` | | `false` | Only verify — do not copy |
-| `skip-verify` | | `false` | Skip verification after copy |
+| `verify-only` | | `false` | Only verify — do not copy. Cannot be combined with `skip-verify` |
+| `skip-verify` | | `false` | Skip verification after copy. Cannot be combined with `verify-only` |
 | `quick-verify` | | `false` | Quick verification (refs + tree hashes only) |
 | `since` | | | Incremental verify: only objects after this SHA or date |
 | `report` | | | File path for JSON verification report (single mode: per-repo, batch mode: combined) |

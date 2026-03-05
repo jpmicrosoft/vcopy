@@ -67,15 +67,17 @@ func PrintTerminal(report *verify.VerificationReport) {
 }
 
 func padRight(s string, length int) string {
-	if len(s) >= length {
-		return s[:length]
+	runes := []rune(s)
+	if len(runes) >= length {
+		return string(runes[:length])
 	}
-	return s + strings.Repeat(" ", length-len(s))
+	return s + strings.Repeat(" ", length-len(runes))
 }
 
 func truncate(s string, max int) string {
-	if len(s) <= max {
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
-	return s[:max-3] + "..."
+	return string(runes[:max-3]) + "..."
 }

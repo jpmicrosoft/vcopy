@@ -91,11 +91,13 @@ func createAndVerifyBundle(host, owner, repo, token, prefix string, verbose bool
 	cloneCmd := exec.Command("git", "clone", "--bare", url, repoPath)
 	cloneCmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if err := cloneCmd.Run(); err != nil {
-		return nil, "", fmt.Errorf("clone failed: %w", err)
+		return nil, "", fmt.Errorf("clone failed: %w", sanitizeError(err, token))
 	}
 
 	// Remove hidden refs (refs/pull/*) so bundles match between source and target
-	removeHiddenRefsFromClone(repoPath)
+	if err := removeHiddenRefsFromClone(repoPath); err != nil {
+		return nil, "", fmt.Errorf("hidden ref cleanup failed: %w", err)
+	}
 
 	// Create bundle
 	bundleCmd := exec.Command("git", "-C", repoPath, "bundle", "create", bundlePath, "--all")
@@ -124,7 +126,12 @@ func createAndVerifyBundle(host, owner, repo, token, prefix string, verbose bool
 		}
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
-			refs[parts[1]] = parts[0] // ref -> SHA
+			ref := parts[1]
+			// Skip HEAD (symbolic ref) — same as ref comparison in refs.go
+			if ref == "HEAD" {
+				continue
+			}
+			refs[ref] = parts[0] // ref -> SHA
 		}
 	}
 
@@ -155,15 +162,15 @@ func fileSHA256(path string) (string, error) {
 
 // removeHiddenRefsFromClone removes refs/pull/* from a bare clone so that
 // verification bundles and comparisons are not affected by GitHub's hidden refs.
-func removeHiddenRefsFromClone(repoPath string) {
+func removeHiddenRefsFromClone(repoPath string) error {
 	cmd := exec.Command("git", "-C", repoPath, "for-each-ref", "--format=%(refname)", "refs/pull/")
 	out, err := cmd.Output()
 	if err != nil {
-		return
+		return fmt.Errorf("listing hidden refs failed: %w", err)
 	}
 	refs := strings.TrimSpace(string(out))
 	if refs == "" {
-		return
+		return nil
 	}
 	var input strings.Builder
 	for _, ref := range strings.Split(refs, "\n") {
@@ -174,5 +181,8 @@ func removeHiddenRefsFromClone(repoPath string) {
 	}
 	delCmd := exec.Command("git", "-C", repoPath, "update-ref", "--stdin")
 	delCmd.Stdin = strings.NewReader(input.String())
-	delCmd.Run()
+	if err := delCmd.Run(); err != nil {
+		return fmt.Errorf("deleting hidden refs failed: %w", err)
+	}
+	return nil
 }
