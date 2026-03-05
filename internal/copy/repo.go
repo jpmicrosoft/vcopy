@@ -91,18 +91,14 @@ func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 		}
 	} else if codeOnly {
 		// Code only: push branches, skip tags entirely
-		pushErr := retry.Do(retry.Default(), "git push", func() error {
-			return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--all", "--force", tgtURL)
-		})
+		pushErr := pushBranchesWithForce(verbose, srcToken, tgtToken, &mirrorPath, tgtURL)
 		if pushErr != nil {
 			sp.StopFail()
 			return fmt.Errorf("push branches failed: %w", pushErr)
 		}
 	} else {
 		// Additive: force-update branches, push new tags (existing tags preserved)
-		pushErr := retry.Do(retry.Default(), "git push", func() error {
-			return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--all", "--force", tgtURL)
-		})
+		pushErr := pushBranchesWithForce(verbose, srcToken, tgtToken, &mirrorPath, tgtURL)
 		if pushErr != nil {
 			sp.StopFail()
 			return fmt.Errorf("push branches failed: %w", pushErr)
@@ -211,6 +207,12 @@ func removeHiddenRefs(repoPath string, verbose bool) error {
 
 // runGitCmd executes a git command, sanitizing any token from output to prevent leakage.
 func runGitCmd(verbose bool, srcToken, tgtToken string, dir *string, args ...string) error {
+	_, err := runGitCmdOutput(verbose, srcToken, tgtToken, dir, args...)
+	return err
+}
+
+// runGitCmdOutput executes a git command and returns sanitized stderr alongside the error.
+func runGitCmdOutput(verbose bool, srcToken, tgtToken string, dir *string, args ...string) (string, error) {
 	gitArgs := args
 	if dir != nil {
 		gitArgs = append([]string{"-C", *dir}, args...)
@@ -225,22 +227,74 @@ func runGitCmd(verbose bool, srcToken, tgtToken string, dir *string, args ...str
 
 	err := cmd.Run()
 
+	sanitizedStderr := sanitizeOutput(stderrBuf.String(), srcToken, tgtToken)
 	if verbose {
 		sanitized := sanitizeOutput(stdoutBuf.String(), srcToken, tgtToken)
 		if sanitized != "" {
 			fmt.Print(sanitized)
 		}
-		sanitized = sanitizeOutput(stderrBuf.String(), srcToken, tgtToken)
-		if sanitized != "" {
-			fmt.Print(sanitized)
+		if sanitizedStderr != "" {
+			fmt.Print(sanitizedStderr)
 		}
 	}
 
 	if err != nil {
-		sanitizedErr := sanitizeOutput(stderrBuf.String(), srcToken, tgtToken)
-		return fmt.Errorf("%w: %s", err, sanitizedErr)
+		return sanitizedStderr, fmt.Errorf("%w: %s", err, sanitizedStderr)
 	}
-	return nil
+	return sanitizedStderr, nil
+}
+
+// pushBranchesWithForce pushes all branches with --force. If the remote rejects
+// specific refs (e.g., branch protection/rulesets), those are warned about while
+// non-rejected branches are considered successfully pushed.
+func pushBranchesWithForce(verbose bool, srcToken, tgtToken string, mirrorPath *string, tgtURL string) error {
+	stderr, err := runGitCmdOutput(verbose, srcToken, tgtToken, mirrorPath, "push", "--all", "--force", tgtURL)
+	if err == nil {
+		return nil
+	}
+	if isPartialRemoteRejection(stderr) {
+		refs := extractRejectedRefs(stderr)
+		fmt.Printf("\n  ⚠ %d branch(es) rejected by remote (protected by branch rules):\n", len(refs))
+		for _, ref := range refs {
+			fmt.Printf("    - %s\n", ref)
+		}
+		return nil
+	}
+	// Transient error — retry with standard logic
+	return retry.Do(retry.Default(), "git push", func() error {
+		return runGitCmd(verbose, srcToken, tgtToken, mirrorPath, "push", "--all", "--force", tgtURL)
+	})
+}
+
+// isPartialRemoteRejection checks if push stderr indicates specific refs were
+// rejected by the server (branch protection/rulesets), not a total failure.
+func isPartialRemoteRejection(stderr string) bool {
+	if !strings.Contains(stderr, "[remote rejected]") {
+		return false
+	}
+	// fatal: errors indicate total failure (auth, network, etc.)
+	return !strings.Contains(stderr, "fatal:")
+}
+
+// extractRejectedRefs parses git push stderr for rejected branch names.
+func extractRejectedRefs(stderr string) []string {
+	var refs []string
+	for _, line := range strings.Split(stderr, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, "[remote rejected]") {
+			continue
+		}
+		// Line format: ! [remote rejected] branch -> branch (reason)
+		parts := strings.SplitN(line, "[remote rejected]", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		refPart := strings.TrimSpace(parts[1])
+		if idx := strings.Index(refPart, " ->"); idx > 0 {
+			refs = append(refs, refPart[:idx])
+		}
+	}
+	return refs
 }
 
 // sanitizeOutput replaces tokens in output with [REDACTED] to prevent credential leakage.
