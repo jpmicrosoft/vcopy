@@ -32,10 +32,11 @@ type BatchReport struct {
 
 // BatchSummary holds counts for the batch operation.
 type BatchSummary struct {
-	Total     int `json:"total"`
-	Succeeded int `json:"succeeded"`
-	Failed    int `json:"failed"`
-	Skipped   int `json:"skipped"`
+	Total           int `json:"total"`
+	Succeeded       int `json:"succeeded"`
+	Failed          int `json:"failed"`
+	Skipped         int `json:"skipped"`
+	ReleasesSkipped int `json:"releases_skipped,omitempty"`
 }
 
 // WriteBatchJSON writes the batch verification report to a JSON file.

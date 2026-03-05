@@ -421,8 +421,11 @@ const maxRateLimitRetries = 3
 const maxRateLimitWait = 2 * time.Minute
 
 // rateLimitTransport wraps an http.RoundTripper and automatically retries
-// requests that receive a 403 response with rate limit headers (X-RateLimit-Remaining: 0).
-// It sleeps until the X-RateLimit-Reset time before retrying.
+// requests that hit GitHub rate limits:
+//   - Primary (403 with X-RateLimit-Remaining: 0): sleeps until X-RateLimit-Reset + 5 s buffer.
+//   - Secondary/abuse (429 Too Many Requests): sleeps for Retry-After + 2 s buffer (60 s if header absent).
+//
+// Both paths retry up to maxRateLimitRetries times, capped at maxRateLimitWait per sleep.
 type rateLimitTransport struct {
 	base http.RoundTripper
 }

@@ -227,11 +227,8 @@ var err error
 if publicSource {
 fmt.Println("Public source mode: skipping source authentication")
 if sourceToken != "" {
-	// Use provided token for API calls (higher rate limits) while keeping
-	// git clone unauthenticated (public HTTPS). This avoids the 60 req/hr
-	// unauthenticated API limit for metadata operations like releases.
 	srcToken = sourceToken
-	fmt.Println("  Using --source-token for API calls (5,000 req/hr)")
+	fmt.Println("  Using --source-token for authenticated access (5,000 req/hr)")
 } else if copyIssues || copyPRs {
 fmt.Println("Note: Metadata copy from public repos uses unauthenticated API access (60 req/hr rate limit).")
 fmt.Println("      For repos with many issues/PRs/releases, consider providing a source token for higher limits.")
@@ -312,7 +309,12 @@ if !codeOnly {
 if exists && !forceOverwrite {
 fmt.Println("Syncing new releases to target (existing releases preserved)...")
 if err := vcopy.SyncReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-fmt.Printf("Warning: release sync failed: %v\n", err)
+if ghclient.IsRateLimitError(err) {
+	fmt.Println("⚠ Release sync aborted: API rate limit exhausted. Releases may be incomplete.")
+	fmt.Println("  Re-run with --source-token or wait for rate limit reset.")
+} else {
+	fmt.Printf("Warning: release sync failed: %v\n", err)
+}
 }
 		} else if exists && forceOverwrite {
 			// --force on existing repo: clean orphaned releases, then copy all from source
@@ -322,13 +324,23 @@ fmt.Printf("Warning: release sync failed: %v\n", err)
 			}
 			fmt.Println("Copying releases...")
 			if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-				fmt.Printf("Warning: release copy failed: %v\n", err)
+				if ghclient.IsRateLimitError(err) {
+					fmt.Println("⚠ Release copy aborted: API rate limit exhausted. Releases may be incomplete.")
+					fmt.Println("  Re-run with --source-token or wait for rate limit reset.")
+				} else {
+					fmt.Printf("Warning: release copy failed: %v\n", err)
+				}
 			}
 		} else {
 			// New repo: copy all releases from source
 			fmt.Println("Copying releases...")
 			if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-				fmt.Printf("Warning: release copy failed: %v\n", err)
+				if ghclient.IsRateLimitError(err) {
+					fmt.Println("⚠ Release copy aborted: API rate limit exhausted. Releases may be incomplete.")
+					fmt.Println("  Re-run with --source-token or wait for rate limit reset.")
+				} else {
+					fmt.Printf("Warning: release copy failed: %v\n", err)
+				}
 			}
 }
 } else if verbose {
@@ -512,7 +524,7 @@ func batchRun(cmd *cobra.Command, args []string) error {
 		fmt.Println("Public source mode: skipping source authentication")
 		if sourceToken != "" {
 			srcToken = sourceToken
-			fmt.Println("  Using --source-token for API calls (5,000 req/hr)")
+			fmt.Println("  Using --source-token for authenticated access (5,000 req/hr)")
 		}
 		tgtToken, err = auth.AuthenticateTarget(authMethod, targetHost, targetToken)
 		if err != nil {
@@ -616,7 +628,6 @@ func batchRun(cmd *cobra.Command, args []string) error {
 				fmt.Println("    Git clone, push, and verification will continue normally.")
 				fmt.Println("    Re-run with a shorter batch or authenticated source to copy releases.")
 			}
-			releasesSkipped++
 		} else if rateLimitHit && !codeOnly {
 			releasesSkipped++
 		}
@@ -669,10 +680,11 @@ func batchRun(cmd *cobra.Command, args []string) error {
 			SearchFilter: batchSearch,
 			Timestamp:    time.Now().UTC(),
 			Summary: report.BatchSummary{
-				Total:     len(repos),
-				Succeeded: succeeded,
-				Failed:    failed,
-				Skipped:   skipped,
+				Total:           len(repos),
+				Succeeded:       succeeded,
+				Failed:          failed,
+				Skipped:         skipped,
+				ReleasesSkipped: releasesSkipped,
 			},
 			Repos: repoResults,
 		}
