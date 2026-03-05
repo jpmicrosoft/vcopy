@@ -38,7 +38,7 @@ That's it. vcopy authenticates, creates the target as private, mirrors all branc
 vcopy myorg/myrepo target-org --target-host github.mycompany.com
 
 # Copy a public repo (no source token needed)
-vcopy golang/go my-org --public
+vcopy golang/go my-org --public-source
 
 # Code only — no tags, releases, or metadata
 vcopy myorg/myrepo target-org --code-only
@@ -81,7 +81,7 @@ See the [Action documentation](action/README.md) for full setup and examples.
 | **Attestation** | `--sign` GPG-signs the JSON verification report for tamper-proof audit trails. |
 | **Reporting** | JSON verification reports. In batch mode: combined report + optional per-repo reports. |
 | **LFS** | `--lfs` includes Git LFS objects (auto-detects and warns). |
-| **Auth** | Auto-detects `gh` CLI tokens, falls back to PAT. `--public` for open-source repos. |
+| **Auth** | Auto-detects `gh` CLI tokens, falls back to PAT. `--public-source` for open-source repos. |
 | **Resilience** | Automatic retry with exponential backoff on network/API failures. |
 | **Config** | YAML config file (`--config`) for repeatable setups. |
 | **Cross-platform** | Single binary for Windows, macOS, Linux (amd64 + arm64). |
@@ -234,11 +234,11 @@ vcopy myorg/myrepo target-org --dry-run
 
 ## Public Repositories
 
-Use the `--public` flag when the source repository is publicly accessible. This skips source authentication entirely — you only need credentials for the target.
+Use the `--public-source` flag when the source repository is publicly accessible. This skips source authentication entirely — you only need credentials for the target.
 
-### How `--public` works
+### How `--public-source` works
 
-| Feature | With `--public` | Without `--public` |
+| Feature | With `--public-source` | Without `--public-source` |
 |---------|----------------|-------------------|
 | Git clone/push | ✅ No source token needed | Requires source token |
 | Verification (refs, objects, trees, bundle) | ✅ No source token needed | Requires source token |
@@ -250,17 +250,23 @@ Use the `--public` flag when the source repository is publicly accessible. This 
 
 Copy a public repo (no source auth needed):
 ```bash
-vcopy golang/go my-org --public
+vcopy golang/go my-org --public-source
 ```
 
 Copy a public repo with metadata (rate-limited for large repos):
 ```bash
-vcopy golang/go my-org --public --all-metadata
+vcopy golang/go my-org --public-source --all-metadata
 ```
 
 Copy a public repo to an Enterprise instance:
 ```bash
-vcopy kubernetes/kubernetes my-org --public --target-host github.mycompany.com
+vcopy kubernetes/kubernetes my-org --public-source --target-host github.mycompany.com
+```
+
+Copy a public repo as an internal repo in the target org:
+
+```bash
+vcopy kubernetes/kubernetes my-org --public-source --visibility internal
 ```
 
 ### Rate limiting with public repos
@@ -268,12 +274,12 @@ vcopy kubernetes/kubernetes my-org --public --target-host github.mycompany.com
 When copying metadata from public repos without a source token, the GitHub API allows only **60 requests per hour** (unauthenticated). This is usually fine for:
 - Repos with fewer than ~50 issues/PRs/releases
 
-For larger repos, provide a source token even with `--public` to get 5,000 req/hr:
+For larger repos, provide a source token even with `--public-source` to get 5,000 req/hr:
 ```bash
-vcopy large-org/big-repo my-org --public --issues --source-token ghp_xxx
+vcopy large-org/big-repo my-org --public-source --issues --source-token ghp_xxx
 ```
 
-The `--public` flag controls whether source auth is *required* — you can always optionally provide a `--source-token` alongside it for better rate limits on metadata operations.
+The `--public-source` flag controls whether source auth is *required* — you can always optionally provide a `--source-token` alongside it for better rate limits on metadata operations.
 
 ## Integrity Verification
 
@@ -321,7 +327,8 @@ Creates a `git bundle` from each repo (a self-contained archive of all refs and 
 | `--auth-method` | `auto` | How to authenticate: `auto` tries gh CLI then PAT prompt, `gh` uses gh CLI only, `pat` uses tokens only |
 | `--source-token` | | Personal Access Token for the source instance (avoids interactive prompt) |
 | `--target-token` | | Personal Access Token for the target instance (avoids interactive prompt) |
-| `--public` | `false` | Source repo is publicly accessible — skips source authentication entirely, only target credentials needed |
+| `--public-source` | `false` | Source repo is publicly accessible — skips source authentication entirely, only target credentials needed |
+| `--visibility` | `private` | Target repo visibility: `private`, `public`, or `internal` |
 | `--lfs` | `false` | Include Git Large File Storage objects in the copy (requires `git-lfs` installed) |
 | `--force` | `false` | Destructive mirror push to an existing target repo — overwrites all branches, tags, and releases. Requires `yes/no` confirmation unless `--non-interactive` is set |
 | `--code-only` | `false` | Copy only branches and commits — skips tags, releases, and all metadata. Verification skips tag-dependent checks |
@@ -496,19 +503,19 @@ vcopy batch <source-org> <target-org> --search "<name-filter>" [flags]
 
 ```bash
 # Preview all Azure Terraform AVM modules (dry-run)
-vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public --no-github --dry-run
+vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public-source --no-github --dry-run
 
 # Copy all AVM modules (resource + pattern)
-vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public --no-github --skip-verify
+vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public-source --no-github --skip-verify
 
 # Copy only AVM resource modules
-vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-res-" --public --no-github
+vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-res-" --public-source --no-github
 
 # Copy with a prefix on target names
-vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --prefix "avm-" --public --no-github
+vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --prefix "avm-" --public-source --no-github
 
 # Resume an interrupted batch
-vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --skip-existing --public --no-github
+vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --skip-existing --public-source --no-github
 ```
 
 ### Generic Examples
@@ -524,10 +531,10 @@ vcopy batch corp-org cloud-org --search "platform-" --source-host ghes.corp.com 
 vcopy batch source-org target-org --search "api-" --suffix "-imported"
 
 # Batch copy with combined report
-vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public --no-github --report batch-audit.json
+vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public-source --no-github --report batch-audit.json
 
 # Batch copy with combined + per-repo reports
-vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public --report batch-audit.json --per-repo-report
+vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public-source --report batch-audit.json --per-repo-report
 ```
 
 ### Batch Flags
@@ -542,7 +549,7 @@ vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public --repor
 | `--report` | | Path to write a combined JSON batch report with all repo results |
 | `--per-repo-report` | `false` | Also write individual JSON reports per repo (e.g., `report-reponame.json`) |
 
-All standard vcopy flags (`--public`, `--no-github`, `--skip-verify`, `--code-only`, etc.) are also available and apply to every repo in the batch.
+All standard vcopy flags (`--public-source`, `--visibility`, `--no-github`, `--skip-verify`, `--code-only`, etc.) are also available and apply to every repo in the batch.
 
 ### Target Naming
 
@@ -650,6 +657,7 @@ target:
   org: target-org
   host: github.mycompany.com
   name: my-mirror
+  visibility: private  # Target repo visibility: private, public, or internal
 
 auth:
   method: auto
@@ -716,7 +724,7 @@ For full documentation, inputs/outputs reference, and example workflows, see **[
 Pre-built binaries include the platform and architecture in the filename. You can either run it directly (`./vcopy-windows-amd64.exe myorg/repo target-org`) or rename it to `vcopy.exe` (or `vcopy` on Linux/macOS) so the examples in this README work as-is. No installation step is required — it's a standalone executable.
 
 **Authentication fails with "401 Unauthorized".**
-Ensure your token has the `repo` scope. For public source repos, use `--public` to skip source authentication entirely.
+Ensure your token has the `repo` scope. For public source repos, use `--public-source` to skip source authentication entirely.
 
 **"Must have admin rights to Repository" when using `--force`.**
 Your target token needs admin-level access to the target repo. For organization-owned repos, ensure the token has `repo` scope and the user is an org owner or has admin role on the repo.

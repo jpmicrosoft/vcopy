@@ -15,33 +15,35 @@ ghclient "github.com/jpmicrosoft/vcopy/internal/github"
 "github.com/jpmicrosoft/vcopy/internal/report"
 "github.com/jpmicrosoft/vcopy/internal/verify"
 "github.com/spf13/cobra"
+"github.com/spf13/pflag"
 )
 
 // version is set at build time via -ldflags "-X main.version=..."
 var version = "dev"
 
 var (
-sourceHost   string
-targetHost   string
-targetName   string
-authMethod   string
-sourceToken  string
-targetToken  string
-publicSource bool
-lfs          bool
-force        bool
-codeOnly     bool
-copyIssues   bool
-copyPRs      bool
-copyWiki     bool
-allMetadata  bool
-verifyOnly   bool
-skipVerify   bool
-quickVerify  bool
-since        string
-reportPath   string
-signKey      string
-configPath   string
+sourceHost       string
+targetHost       string
+targetName       string
+targetVisibility string
+authMethod       string
+sourceToken      string
+targetToken      string
+publicSource     bool
+lfs              bool
+force            bool
+codeOnly         bool
+copyIssues       bool
+copyPRs          bool
+copyWiki         bool
+allMetadata      bool
+verifyOnly       bool
+skipVerify       bool
+quickVerify      bool
+since            string
+reportPath       string
+signKey          string
+configPath       string
 noWorkflows    bool
 noCopilot      bool
 noActions      bool
@@ -81,7 +83,10 @@ f.StringVar(&targetName, "target-name", "", "Target repo name (default: same as 
 f.StringVar(&authMethod, "auth-method", "auto", "Auth method: auto, gh, pat")
 f.StringVar(&sourceToken, "source-token", "", "PAT for source (if auth-method=pat)")
 f.StringVar(&targetToken, "target-token", "", "PAT for target (if auth-method=pat)")
+f.BoolVar(&publicSource, "public-source", false, "Source repo is public (skip source authentication)")
 f.BoolVar(&publicSource, "public", false, "Source repo is public (skip source authentication)")
+_ = f.MarkDeprecated("public", "use --public-source instead")
+f.StringVar(&targetVisibility, "visibility", "private", "Target repo visibility: private, public, or internal")
 f.BoolVar(&lfs, "lfs", false, "Include Git LFS objects in copy")
 f.BoolVar(&force, "force", false, "Force push to existing target repo (WARNING: overwrites all branches/tags)")
 f.BoolVar(&codeOnly, "code-only", false, "Copy source code only (branches/commits, no tags, releases, or metadata)")
@@ -113,7 +118,7 @@ then copy each one to the target organization. Supports prefix/suffix renaming,
 skip-existing for resumable runs, and all standard vcopy flags.
 
 Example:
-  vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public --no-github --dry-run`,
+  vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public-source --no-github --dry-run`,
 		Args: cobra.ExactArgs(2),
 		RunE: batchRun,
 	}
@@ -131,7 +136,10 @@ Example:
 	bf.StringVar(&authMethod, "auth-method", "auto", "Auth method: auto, gh, pat")
 	bf.StringVar(&sourceToken, "source-token", "", "PAT for source (if auth-method=pat)")
 	bf.StringVar(&targetToken, "target-token", "", "PAT for target (if auth-method=pat)")
+	bf.BoolVar(&publicSource, "public-source", false, "Source repos are public (skip source authentication)")
 	bf.BoolVar(&publicSource, "public", false, "Source repos are public (skip source authentication)")
+	_ = bf.MarkDeprecated("public", "use --public-source instead")
+	bf.StringVar(&targetVisibility, "visibility", "private", "Target repo visibility: private, public, or internal")
 	bf.BoolVar(&lfs, "lfs", false, "Include Git LFS objects in copy")
 	bf.BoolVar(&codeOnly, "code-only", false, "Copy source code only (branches/commits, no tags, releases, or metadata)")
 	bf.BoolVar(&skipVerify, "skip-verify", false, "Skip verification (copy only)")
@@ -160,7 +168,7 @@ cfg, err = config.Load(configPath)
 if err != nil {
 return fmt.Errorf("config error: %w", err)
 }
-applyConfig(cfg)
+applyConfig(cfg, cmd.Flags())
 }
 
 // Config file may supply args, CLI args override
@@ -185,6 +193,10 @@ if verifyOnly && skipVerify {
 return fmt.Errorf("cannot use --verify-only and --skip-verify together")
 }
 
+if err := validateVisibility(targetVisibility); err != nil {
+	return err
+}
+
 // Resolve target repo name
 repoName := targetName
 if repoName == "" {
@@ -198,7 +210,7 @@ repoName = name
 if dryRun {
 fmt.Println("=== DRY RUN ===")
 fmt.Printf("Source:      %s/%s (public: %v)\n", sourceHost, sourceRepo, publicSource)
-fmt.Printf("Target:      %s/%s/%s\n", targetHost, targetOrg, repoName)
+fmt.Printf("Target:      %s/%s/%s (visibility: %s)\n", targetHost, targetOrg, repoName, targetVisibility)
 fmt.Printf("LFS:         %v\n", lfs)
 fmt.Printf("Metadata:    issues=%v, PRs=%v, wiki=%v\n", copyIssues, copyPRs, copyWiki)
 		fmt.Printf("Code only:   %v\n", codeOnly)
@@ -244,7 +256,7 @@ return err
 }
 
 if !verifyOnly {
-fmt.Printf("Creating target repository %s/%s on %s...\n", targetOrg, repoName, targetHost)
+fmt.Printf("Creating target repository %s/%s on %s (visibility: %s)...\n", targetOrg, repoName, targetHost, targetVisibility)
 
 // Check if target repo already exists
 exists, existErr := tgtClient.RepoExists(targetOrg, repoName)
@@ -276,7 +288,7 @@ forceOverwrite = true
 fmt.Printf("  Repository %s/%s already exists. Using additive mode (existing tags and releases preserved).\n", targetOrg, repoName)
 }
 } else {
-if err := tgtClient.CreateRepo(targetOrg, repoName, verbose); err != nil {
+if err := tgtClient.CreateRepo(targetOrg, repoName, targetVisibility, verbose); err != nil {
 return fmt.Errorf("failed to create target repo: %w", err)
 }
 }
@@ -392,7 +404,7 @@ return fmt.Errorf("exclude cleanup failed: %w", err)
 return nil
 }
 
-func applyConfig(cfg *config.Config) {
+func applyConfig(cfg *config.Config, flags *pflag.FlagSet) {
 if sourceHost == "github.com" && cfg.Source.Host != "" {
 sourceHost = cfg.Source.Host
 }
@@ -412,6 +424,7 @@ if targetToken == "" && cfg.Auth.TargetToken != "" {
 targetToken = cfg.Auth.TargetToken
 }
 if !publicSource { publicSource = cfg.Source.Public }
+if (flags == nil || !flags.Changed("visibility")) && cfg.Target.Visibility != "" { targetVisibility = cfg.Target.Visibility }
 if !lfs { lfs = cfg.LFS }
 if !force { force = cfg.Force }
 if !codeOnly { codeOnly = cfg.CodeOnly }
@@ -477,6 +490,10 @@ return answer == "yes" || answer == "y"
 func batchRun(cmd *cobra.Command, args []string) error {
 	sourceOrg := args[0]
 	targetOrg := args[1]
+
+	if err := validateVisibility(targetVisibility); err != nil {
+		return err
+	}
 
 	// Authenticate
 	var srcToken, tgtToken string
@@ -666,7 +683,7 @@ func batchRun(cmd *cobra.Command, args []string) error {
 // Returns the verification report (nil if verification was skipped) and any error.
 func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targetOrg, targetRepoName, srcToken, tgtToken string, excludeList []string) (*verify.VerificationReport, error) {
 	// Create target repo
-	if err := tgtClient.CreateRepo(targetOrg, targetRepoName, verbose); err != nil {
+	if err := tgtClient.CreateRepo(targetOrg, targetRepoName, targetVisibility, verbose); err != nil {
 		return nil, fmt.Errorf("create repo: %w", err)
 	}
 
@@ -708,4 +725,13 @@ func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targe
 	}
 
 	return results, nil
+}
+
+func validateVisibility(v string) error {
+	switch v {
+	case "private", "public", "internal":
+		return nil
+	default:
+		return fmt.Errorf("invalid visibility value %q: must be private, public, or internal", v)
+	}
 }

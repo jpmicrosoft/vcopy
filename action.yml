@@ -61,10 +61,19 @@ inputs:
   target-token:
     description: 'Personal Access Token for the target GitHub instance'
     required: true
-  public:
+  public-source:
     description: 'Source repo is public — skip source authentication'
     required: false
     default: 'false'
+  public:
+    description: 'Deprecated: use public-source instead. Source repo is public — skip source authentication.'
+    required: false
+    default: 'false'
+    deprecationMessage: 'Use public-source instead'
+  visibility:
+    description: 'Target repo visibility: private, public, or internal'
+    required: false
+    default: 'private'
   lfs:
     description: 'Include Git LFS objects in copy'
     required: false
@@ -187,7 +196,9 @@ runs:
         INPUT_TARGET_NAME: ${{ inputs.target-name }}
         INPUT_SOURCE_TOKEN: ${{ inputs.source-token }}
         INPUT_TARGET_TOKEN: ${{ inputs.target-token }}
+        INPUT_PUBLIC_SOURCE: ${{ inputs.public-source }}
         INPUT_PUBLIC: ${{ inputs.public }}
+        INPUT_VISIBILITY: ${{ inputs.visibility }}
         INPUT_LFS: ${{ inputs.lfs }}
         INPUT_FORCE: ${{ inputs.force }}
         INPUT_CODE_ONLY: ${{ inputs.code-only }}

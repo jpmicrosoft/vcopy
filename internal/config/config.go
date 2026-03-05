@@ -41,9 +41,10 @@ type SourceConfig struct {
 
 // TargetConfig holds target repository settings.
 type TargetConfig struct {
-	Org  string `yaml:"org"`
-	Host string `yaml:"host"`
-	Name string `yaml:"name"`
+	Org        string `yaml:"org"`
+	Host       string `yaml:"host"`
+	Name       string `yaml:"name"`
+	Visibility string `yaml:"visibility"`
 }
 
 // AuthConfig holds authentication settings.

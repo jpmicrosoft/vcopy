@@ -40,7 +40,8 @@ No setup required — the action is publicly available from the GitHub Marketpla
 | `source-host` | | `github.com` | Source GitHub hostname |
 | `target-host` | | `github.com` | Target GitHub hostname (e.g., `github.mycompany.com`) |
 | `target-name` | | same as source | Target repository name |
-| `public` | | `false` | Source repo is public — skip source auth |
+| `public-source` | | `false` | Source repo is public — skip source auth |
+| `visibility` | | `private` | Target repo visibility: `private`, `public`, or `internal` |
 | `lfs` | | `false` | Include Git LFS objects |
 | `force` | | `false` | Destructive mirror push (overwrites everything in target) |
 | `code-only` | | `false` | Copy only branches/commits (no tags, releases, or metadata) |
@@ -102,7 +103,7 @@ jobs:
         with:
           source-repo: kubernetes/kubernetes
           target-org: my-org
-          public: true
+          public-source: true
           target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
 ```
 
@@ -247,7 +248,7 @@ jobs:
           source-org: Azure
           target-org: my-org
           search: 'terraform-azurerm-avm-'
-          public: true
+          public-source: true
           no-github: true
           skip-verify: true
           skip-existing: true
@@ -279,7 +280,7 @@ jobs:
           source-org: Azure
           target-org: my-org
           search: 'terraform-azurerm-avm-'
-          public: true
+          public-source: true
           no-github: true
           skip-existing: true
           report: batch-report.json
@@ -293,7 +294,7 @@ This writes a combined `batch-report.json` with all repos plus individual `batch
 
 ## Token Permissions
 
-Tokens need the `repo` scope (full control of private repositories) on both source and target instances. For public source repos, use `public: true` and omit `source-token`.
+Tokens need the `repo` scope (full control of private repositories) on both source and target instances. For public source repos, use `public-source: true` and omit `source-token`.
 
 ## Supported Runners
 
@@ -314,4 +315,4 @@ The action uses `GITHUB_TOKEN` to download binaries. For private repos, ensure t
 ### Authentication failures
 - Check that tokens have the `repo` scope
 - For Enterprise, ensure the hostname is correct (`target-host: github.mycompany.com`)
-- For public repos, set `public: true` to skip source authentication
+- For public repos, set `public-source: true` to skip source authentication

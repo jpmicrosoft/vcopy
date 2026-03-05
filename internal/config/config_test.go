@@ -16,6 +16,7 @@ target:
   org: target-org
   host: ghes.example.com
   name: mirror-repo
+  visibility: internal
 auth:
   method: pat
 copy:
@@ -55,6 +56,9 @@ report:
 	}
 	if cfg.Target.Name != "mirror-repo" {
 		t.Errorf("Target.Name = %q", cfg.Target.Name)
+	}
+	if cfg.Target.Visibility != "internal" {
+		t.Errorf("Target.Visibility = %q, want %q", cfg.Target.Visibility, "internal")
 	}
 	if cfg.Auth.Method != "pat" {
 		t.Errorf("Auth.Method = %q", cfg.Auth.Method)
