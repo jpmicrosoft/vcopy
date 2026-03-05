@@ -20,7 +20,7 @@ type RefResult struct {
 }
 
 // VerifyRefs compares all branches and tags between source and target.
-func VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, verbose bool) (*CheckResult, error) {
+func VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, opts Options) (*CheckResult, error) {
 	result := &CheckResult{
 		Name:   "Branch/Tag Ref Comparison",
 		Status: StatusPass,
@@ -40,11 +40,17 @@ func VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 		return result, nil
 	}
 
+	excluded := buildExcludedSet(opts.ExcludedRefs)
 	var refResults []RefResult
-	var mismatches int
+	var mismatches, excludedCount int
 
 	// Check all source refs exist in target with same SHA
 	for ref, srcSHA := range srcRefs {
+		if excluded[ref] {
+			excludedCount++
+			continue
+		}
+
 		tgtSHA, exists := tgtRefs[ref]
 		refType := "branch"
 		if strings.HasPrefix(ref, "refs/tags/") {
@@ -61,7 +67,7 @@ func VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 
 		if !rr.Match {
 			mismatches++
-			if verbose {
+			if opts.Verbose {
 				if !exists {
 					fmt.Printf("  MISSING in target: %s (%s)\n", ref, srcSHA)
 				} else {
@@ -72,7 +78,8 @@ func VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 		refResults = append(refResults, rr)
 	}
 
-	// Check for extra refs in target
+	// Check for extra refs in target. Excluded refs still exist in srcRefs, so
+	// they will not be incorrectly flagged as "extra".
 	for ref, tgtSHA := range tgtRefs {
 		if _, exists := srcRefs[ref]; !exists {
 			refResults = append(refResults, RefResult{
@@ -82,7 +89,7 @@ func VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 				Match:     false,
 			})
 			mismatches++
-			if verbose {
+			if opts.Verbose {
 				fmt.Printf("  EXTRA in target: %s (%s)\n", ref, tgtSHA)
 			}
 		}
@@ -90,7 +97,10 @@ func VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 
 	if mismatches > 0 {
 		result.Status = StatusFail
-		result.Details = fmt.Sprintf("%d ref mismatches out of %d total refs", mismatches, len(srcRefs))
+		result.Details = fmt.Sprintf("%d ref mismatches out of %d total refs", mismatches, len(srcRefs)-excludedCount)
+	} else if excludedCount > 0 {
+		result.Status = StatusWarn
+		result.Details = fmt.Sprintf("All %d checked refs match (%d refs excluded — rejected by remote)", len(srcRefs)-excludedCount, excludedCount)
 	} else {
 		result.Details = fmt.Sprintf("All %d refs match", len(srcRefs))
 	}

@@ -8,13 +8,13 @@ import (
 )
 
 // VerifyObjects compares all git object hashes between source and target repos.
-func VerifyObjects(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, verbose bool) (*CheckResult, error) {
+func VerifyObjects(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, opts Options) (*CheckResult, error) {
 	result := &CheckResult{
 		Name:   "Git Object Hash Verification",
 		Status: StatusPass,
 	}
 
-	if verbose {
+	if opts.Verbose {
 		fmt.Println("  Cloning source repo for object enumeration...")
 	}
 	srcPath, srcCleanup, err := cloneBareTmp(srcHost, srcOwner, srcName, srcToken, "src-obj")
@@ -25,7 +25,17 @@ func VerifyObjects(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToke
 	}
 	defer srcCleanup()
 
-	if verbose {
+	// Remove excluded refs from source clone so objects only reachable through
+	// rejected branches are not included in the comparison.
+	if len(opts.ExcludedRefs) > 0 {
+		if err := removeExcludedRefsFromClone(srcPath, opts.ExcludedRefs); err != nil {
+			result.Status = StatusFail
+			result.Details = fmt.Sprintf("Failed to remove excluded refs from source clone: %v", err)
+			return result, nil
+		}
+	}
+
+	if opts.Verbose {
 		fmt.Println("  Cloning target repo for object enumeration...")
 	}
 	tgtPath, tgtCleanup, err := cloneBareTmp(tgtHost, tgtOrg, tgtName, tgtToken, "tgt-obj")
@@ -79,7 +89,7 @@ func VerifyObjects(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToke
 		var details strings.Builder
 		if len(missingSrc) > 0 {
 			details.WriteString(fmt.Sprintf("%d objects in source missing from target", len(missingSrc)))
-			if verbose {
+			if opts.Verbose {
 				sort.Strings(missingSrc)
 				for _, obj := range missingSrc[:min(10, len(missingSrc))] {
 					fmt.Printf("  MISSING: %s\n", obj)
@@ -93,6 +103,9 @@ func VerifyObjects(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToke
 			details.WriteString(fmt.Sprintf("%d extra objects in target", len(extraTgt)))
 		}
 		result.Details = details.String()
+	} else if len(opts.ExcludedRefs) > 0 {
+		result.Status = StatusWarn
+		result.Details = fmt.Sprintf("All %d objects match (%d refs excluded — rejected by remote)", len(srcObjects), len(opts.ExcludedRefs))
 	} else {
 		result.Details = fmt.Sprintf("All %d objects match", len(srcObjects))
 	}
@@ -123,7 +136,7 @@ func listAllObjects(repoPath string) ([]string, error) {
 }
 
 // VerifyObjectsSince compares objects created after a given SHA or date.
-func VerifyObjectsSince(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, since string, verbose bool) (*CheckResult, error) {
+func VerifyObjectsSince(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, since string, opts Options) (*CheckResult, error) {
 	result := &CheckResult{
 		Name:   "Incremental Object Verification",
 		Status: StatusPass,
@@ -136,6 +149,15 @@ func VerifyObjectsSince(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, sr
 		return result, nil
 	}
 	defer srcCleanup()
+
+	// Remove excluded refs so incremental comparison skips rejected branches
+	if len(opts.ExcludedRefs) > 0 {
+		if err := removeExcludedRefsFromClone(srcPath, opts.ExcludedRefs); err != nil {
+			result.Status = StatusFail
+			result.Details = fmt.Sprintf("Failed to remove excluded refs from source clone: %v", err)
+			return result, nil
+		}
+	}
 
 	tgtPath, tgtCleanup, err := cloneBareTmp(tgtHost, tgtOrg, tgtName, tgtToken, "tgt-inc")
 	if err != nil {
@@ -178,6 +200,9 @@ func VerifyObjectsSince(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, sr
 	if missing > 0 {
 		result.Status = StatusFail
 		result.Details = fmt.Sprintf("%d objects since %s in source missing from target", missing, since)
+	} else if len(opts.ExcludedRefs) > 0 {
+		result.Status = StatusWarn
+		result.Details = fmt.Sprintf("All %d objects since %s match (%d refs excluded — rejected by remote)", len(srcObjects), since, len(opts.ExcludedRefs))
 	} else {
 		result.Details = fmt.Sprintf("All %d objects since %s match", len(srcObjects), since)
 	}

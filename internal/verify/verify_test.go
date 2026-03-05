@@ -107,3 +107,52 @@ func TestSanitizeRepoName(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildExcludedSet(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []string
+		check string
+		want  bool
+	}{
+		{"nil input", nil, "refs/heads/main", false},
+		{"empty input", []string{}, "refs/heads/main", false},
+		{"present ref", []string{"refs/heads/main", "refs/heads/dev"}, "refs/heads/main", true},
+		{"absent ref", []string{"refs/heads/main"}, "refs/heads/dev", false},
+		{"duplicate refs", []string{"refs/heads/main", "refs/heads/main"}, "refs/heads/main", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set := buildExcludedSet(tt.input)
+			got := set[tt.check]
+			if got != tt.want {
+				t.Errorf("buildExcludedSet(%v)[%q] = %v, want %v", tt.input, tt.check, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRemoveExcludedRefsFromClone_Validation(t *testing.T) {
+	tests := []struct {
+		name    string
+		refs    []string
+		wantErr bool
+	}{
+		{"empty refs", []string{}, false},
+		{"invalid ref no prefix", []string{"main"}, true},
+		{"invalid ref with newline", []string{"refs/heads/main\nevil"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := removeExcludedRefsFromClone("/nonexistent", tt.refs)
+			if tt.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}

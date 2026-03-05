@@ -15,20 +15,20 @@ import (
 // VerifyBundle creates git bundles from both source and target, verifies they are valid,
 // and compares the refs they contain. Raw checksums are not compared because git bundles
 // are non-deterministic (packfile compression/ordering varies between clones).
-func VerifyBundle(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, verbose bool) (*CheckResult, error) {
+func VerifyBundle(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, opts Options) (*CheckResult, error) {
 	result := &CheckResult{
 		Name:   "Bundle Integrity Verification",
 		Status: StatusPass,
 	}
 
-	srcRefs, srcChecksum, err := createAndVerifyBundle(srcHost, srcOwner, srcName, srcToken, "src", verbose)
+	srcRefs, srcChecksum, err := createAndVerifyBundle(srcHost, srcOwner, srcName, srcToken, "src", opts.Verbose, opts.ExcludedRefs)
 	if err != nil {
 		result.Status = StatusFail
 		result.Details = fmt.Sprintf("Source bundle failed: %v", err)
 		return result, nil
 	}
 
-	tgtRefs, tgtChecksum, err := createAndVerifyBundle(tgtHost, tgtOrg, tgtName, tgtToken, "tgt", verbose)
+	tgtRefs, tgtChecksum, err := createAndVerifyBundle(tgtHost, tgtOrg, tgtName, tgtToken, "tgt", opts.Verbose, nil)
 	if err != nil {
 		result.Status = StatusFail
 		result.Details = fmt.Sprintf("Target bundle failed: %v", err)
@@ -40,12 +40,12 @@ func VerifyBundle(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken
 	for ref, srcSHA := range srcRefs {
 		if tgtSHA, ok := tgtRefs[ref]; !ok {
 			mismatches++
-			if verbose {
+			if opts.Verbose {
 				fmt.Printf("  MISSING in target bundle: %s\n", ref)
 			}
 		} else if srcSHA != tgtSHA {
 			mismatches++
-			if verbose {
+			if opts.Verbose {
 				fmt.Printf("  MISMATCH: %s source=%s target=%s\n", ref, srcSHA, tgtSHA)
 			}
 		}
@@ -53,15 +53,19 @@ func VerifyBundle(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken
 	for ref := range tgtRefs {
 		if _, ok := srcRefs[ref]; !ok {
 			mismatches++
-			if verbose {
+			if opts.Verbose {
 				fmt.Printf("  EXTRA in target bundle: %s\n", ref)
 			}
 		}
 	}
 
+	excludedCount := len(opts.ExcludedRefs)
 	if mismatches > 0 {
 		result.Status = StatusFail
 		result.Details = fmt.Sprintf("Bundle ref mismatches: %d (source SHA-256: %s, target SHA-256: %s)", mismatches, srcChecksum, tgtChecksum)
+	} else if excludedCount > 0 {
+		result.Status = StatusWarn
+		result.Details = fmt.Sprintf("Both bundles valid, all %d checked refs match (%d refs excluded — rejected by remote) (source: %s, target: %s)", len(srcRefs), excludedCount, srcChecksum[:12], tgtChecksum[:12])
 	} else {
 		result.Details = fmt.Sprintf("Both bundles valid, all %d refs match (source: %s, target: %s)", len(srcRefs), srcChecksum[:12], tgtChecksum[:12])
 	}
@@ -70,8 +74,8 @@ func VerifyBundle(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken
 }
 
 // createAndVerifyBundle clones a repo, creates a git bundle, verifies it, and returns
-// the bundle's ref list and SHA-256 checksum.
-func createAndVerifyBundle(host, owner, repo, token, prefix string, verbose bool) (map[string]string, string, error) {
+// the bundle's ref list and SHA-256 checksum. excludedRefs are removed before bundling.
+func createAndVerifyBundle(host, owner, repo, token, prefix string, verbose bool, excludedRefs []string) (map[string]string, string, error) {
 	url := ghclient.CloneURL(host, owner, repo, token)
 
 	tmpDir, err := os.MkdirTemp("", "vcopy-bundle-"+prefix+"-*")
@@ -97,6 +101,13 @@ func createAndVerifyBundle(host, owner, repo, token, prefix string, verbose bool
 	// Remove hidden refs (refs/pull/*) so bundles match between source and target
 	if err := removeHiddenRefsFromClone(repoPath); err != nil {
 		return nil, "", fmt.Errorf("hidden ref cleanup failed: %w", err)
+	}
+
+	// Remove excluded refs (rejected by remote) so bundle comparison is accurate
+	if len(excludedRefs) > 0 {
+		if err := removeExcludedRefsFromClone(repoPath, excludedRefs); err != nil {
+			return nil, "", fmt.Errorf("excluded ref cleanup failed: %w", err)
+		}
 	}
 
 	// Create bundle

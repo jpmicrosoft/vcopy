@@ -2,6 +2,7 @@ package verify
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -32,6 +33,33 @@ func sanitizeError(err error, tokens ...string) error {
 		}
 	}
 	return fmt.Errorf("%s", msg)
+}
+
+// buildExcludedSet converts a slice of excluded refs to a set for fast lookup.
+func buildExcludedSet(refs []string) map[string]bool {
+	set := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		set[ref] = true
+	}
+	return set
+}
+
+// removeExcludedRefsFromClone deletes specified refs from a bare clone so that
+// verification comparisons exclude branches rejected by the remote.
+func removeExcludedRefsFromClone(repoPath string, excludedRefs []string) error {
+	if len(excludedRefs) == 0 {
+		return nil
+	}
+	var input strings.Builder
+	for _, ref := range excludedRefs {
+		if strings.ContainsAny(ref, "\n\r") || !strings.HasPrefix(ref, "refs/") {
+			return fmt.Errorf("invalid excluded ref %q", ref)
+		}
+		input.WriteString(fmt.Sprintf("delete %s\n", ref))
+	}
+	delCmd := exec.Command("git", "-C", repoPath, "update-ref", "--stdin")
+	delCmd.Stdin = strings.NewReader(input.String())
+	return delCmd.Run()
 }
 
 // Status constants for verification checks.
@@ -78,9 +106,10 @@ func (r *VerificationReport) AllPassed() bool {
 
 // Options controls which verification checks to run.
 type Options struct {
-	QuickMode bool
-	CodeOnly  bool // skip tag-dependent checks (ref comparison, bundle)
-	Verbose   bool
+	QuickMode    bool
+	CodeOnly     bool     // skip tag-dependent checks (ref comparison, bundle)
+	Verbose      bool
+	ExcludedRefs []string // full ref names (e.g. "refs/heads/main") to exclude from comparison
 }
 
 // RunAll executes all verification checks and returns a consolidated report.
@@ -93,7 +122,7 @@ func RunAll(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtT
 		Timestamp:  time.Now().UTC(),
 	}
 
-	type checkFunc func(string, string, string, string, string, string, string, string, bool) (*CheckResult, error)
+	type checkFunc func(string, string, string, string, string, string, string, string, Options) (*CheckResult, error)
 
 	// Quick mode: only refs + trees
 	// Full mode: refs, objects, trees, signatures, bundle
@@ -131,7 +160,7 @@ func RunAll(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtT
 		}
 
 		sp := progress.Start(fmt.Sprintf("Verifying: %s", check.name))
-		result, err := check.fn(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, opts.Verbose)
+		result, err := check.fn(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, opts)
 		if err != nil {
 			sp.StopFail()
 			report.Checks = append(report.Checks, CheckResult{
@@ -171,7 +200,7 @@ func RunIncremental(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcTok
 		})
 	} else {
 		sp := progress.Start("Verifying: Ref Comparison")
-		refsResult, err := VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, opts.Verbose)
+		refsResult, err := VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, opts)
 		if err != nil {
 			sp.StopFail()
 			report.Checks = append(report.Checks, CheckResult{Name: "Ref Comparison", Status: StatusFail, Details: err.Error()})
@@ -187,7 +216,7 @@ func RunIncremental(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcTok
 
 	// Incremental object verification
 	sp := progress.Start(fmt.Sprintf("Verifying: Objects since %s", since))
-	objResult, err := VerifyObjectsSince(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, since, opts.Verbose)
+	objResult, err := VerifyObjectsSince(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, since, opts)
 	if err != nil {
 		sp.StopFail()
 		report.Checks = append(report.Checks, CheckResult{Name: "Incremental Objects", Status: StatusFail, Details: err.Error()})
@@ -202,7 +231,7 @@ func RunIncremental(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcTok
 
 	// Tree comparison (always)
 	sp = progress.Start("Verifying: Tree Hashes")
-	treeResult, err := VerifyTrees(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, opts.Verbose)
+	treeResult, err := VerifyTrees(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken, opts)
 	if err != nil {
 		sp.StopFail()
 		report.Checks = append(report.Checks, CheckResult{Name: "Tree Hashes", Status: StatusFail, Details: err.Error()})

@@ -15,7 +15,7 @@ type SignatureResult struct {
 }
 
 // VerifySignatures checks that GPG/SSH commit signatures are preserved after copy.
-func VerifySignatures(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, verbose bool) (*CheckResult, error) {
+func VerifySignatures(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, tgtToken string, opts Options) (*CheckResult, error) {
 	result := &CheckResult{
 		Name:   "Commit Signature Verification",
 		Status: StatusPass,
@@ -28,6 +28,16 @@ func VerifySignatures(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcT
 		return result, nil
 	}
 	defer srcCleanup()
+
+	// Remove excluded refs from source clone to avoid counting signatures
+	// only reachable through rejected branches.
+	if len(opts.ExcludedRefs) > 0 {
+		if err := removeExcludedRefsFromClone(srcPath, opts.ExcludedRefs); err != nil {
+			result.Status = StatusFail
+			result.Details = fmt.Sprintf("Failed to remove excluded refs from source clone: %v", err)
+			return result, nil
+		}
+	}
 
 	tgtPath, tgtCleanup, err := cloneBareTmp(tgtHost, tgtOrg, tgtName, tgtToken, "tgt-sig")
 	if err != nil {
@@ -68,7 +78,7 @@ func VerifySignatures(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcT
 	for _, sha := range srcSigned {
 		if !tgtSet[sha] {
 			lost++
-			if verbose {
+			if opts.Verbose {
 				fmt.Printf("  SIGNATURE LOST: commit %s has signature in source but not target\n", sha)
 			}
 		}
