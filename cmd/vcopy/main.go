@@ -567,8 +567,10 @@ func batchRun(cmd *cobra.Command, args []string) error {
 
 	// Execute batch
 	var succeeded, failed, skipped int
+	var releasesSkipped int
 	var failures []string
 	var repoResults []report.BatchRepoResult
+	rateLimitHit := false
 
 	for i, name := range repos {
 		targetRepoName := batchPrefix + name + batchSuffix
@@ -595,7 +597,19 @@ func batchRun(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("\n%s Copying %s → %s/%s\n", prefix, sourceRepo, targetOrg, targetRepoName)
 
-		verifyResult, err := copyOneRepo(srcClient, tgtClient, sourceOrg, name, targetOrg, targetRepoName, srcToken, tgtToken, excludeList)
+		verifyResult, hitRL, err := copyOneRepo(srcClient, tgtClient, sourceOrg, name, targetOrg, targetRepoName, srcToken, tgtToken, excludeList, rateLimitHit)
+		if hitRL && !rateLimitHit {
+			rateLimitHit = true
+			remaining := len(repos) - i - 1
+			if remaining > 0 {
+				fmt.Printf("\n  ⚠ API rate limit exhausted — release copying will be skipped for the remaining %d repos.\n", remaining)
+				fmt.Println("    Git clone, push, and verification will continue normally.")
+				fmt.Println("    Re-run with a shorter batch or authenticated source to copy releases.")
+			}
+			releasesSkipped++
+		} else if rateLimitHit && !codeOnly {
+			releasesSkipped++
+		}
 		if err != nil {
 			fmt.Printf("%s ✗ FAILED: %v\n", prefix, err)
 			failed++
@@ -668,6 +682,9 @@ func batchRun(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Succeeded: %d\n", succeeded)
 	fmt.Printf("  Failed:    %d\n", failed)
 	fmt.Printf("  Skipped:   %d\n", skipped)
+	if releasesSkipped > 0 {
+		fmt.Printf("  Releases skipped (rate limit): %d\n", releasesSkipped)
+	}
 	if len(failures) > 0 {
 		fmt.Println("\n  Failures:")
 		for _, f := range failures {
@@ -684,24 +701,34 @@ func batchRun(cmd *cobra.Command, args []string) error {
 
 // copyOneRepo copies a single repo from source to target, handling creation,
 // mirroring, releases, verification, and path exclusion.
-// Returns the verification report (nil if verification was skipped) and any error.
-func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targetOrg, targetRepoName, srcToken, tgtToken string, excludeList []string) (*verify.VerificationReport, error) {
+// If skipReleases is true, release copying is skipped entirely (used when rate limited).
+// Returns the verification report (nil if verification was skipped), whether a rate
+// limit error was encountered during release copy, and any fatal error.
+func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targetOrg, targetRepoName, srcToken, tgtToken string, excludeList []string, skipReleases bool) (*verify.VerificationReport, bool, error) {
 	// Create target repo
 	if err := tgtClient.CreateRepo(targetOrg, targetRepoName, targetVisibility, verbose); err != nil {
-		return nil, fmt.Errorf("create repo: %w", err)
+		return nil, false, fmt.Errorf("create repo: %w", err)
 	}
 
 	// Mirror
 	rejectedRefs, err := vcopy.MirrorRepo(sourceHost, srcOwner, srcName, targetHost, targetOrg, targetRepoName, srcToken, tgtToken, lfs, false, codeOnly, verbose)
 	if err != nil {
-		return nil, fmt.Errorf("mirror: %w", err)
+		return nil, false, fmt.Errorf("mirror: %w", err)
 	}
 
-	// Copy releases (unless code-only)
-	if !codeOnly {
+	// Copy releases (unless code-only or rate-limited)
+	hitRateLimit := false
+	if !codeOnly && !skipReleases {
 		if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, targetRepoName, verbose); err != nil {
-			fmt.Printf("  Warning: release copy failed: %v\n", err)
+			if ghclient.IsRateLimitError(err) {
+				hitRateLimit = true
+				fmt.Printf("  ⚠ Release copy skipped: API rate limit exhausted\n")
+			} else {
+				fmt.Printf("  Warning: release copy failed: %v\n", err)
+			}
 		}
+	} else if skipReleases && !codeOnly {
+		fmt.Printf("  ⚠ Release copy skipped (rate limit previously exhausted)\n")
 	}
 
 	// Verification
@@ -716,10 +743,10 @@ func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targe
 		var err error
 		results, err = verify.RunAll(sourceHost, srcOwner, srcName, targetHost, targetOrg, targetRepoName, srcToken, tgtToken, opts)
 		if err != nil {
-			return nil, fmt.Errorf("verification: %w", err)
+			return nil, hitRateLimit, fmt.Errorf("verification: %w", err)
 		}
 		if !results.AllPassed() {
-			return results, fmt.Errorf("verification FAILED")
+			return results, hitRateLimit, fmt.Errorf("verification FAILED")
 		}
 	}
 
@@ -730,7 +757,7 @@ func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targe
 		}
 	}
 
-	return results, nil
+	return results, hitRateLimit, nil
 }
 
 func validateVisibility(v string) error {

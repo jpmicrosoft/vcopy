@@ -80,6 +80,8 @@ func VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 
 	// Check for extra refs in target. Excluded refs still exist in srcRefs, so
 	// they will not be incorrectly flagged as "extra".
+	// Extra target refs are expected in additive mode (prior runs, cleanup commits).
+	var extraTgt int
 	for ref, tgtSHA := range tgtRefs {
 		if _, exists := srcRefs[ref]; !exists {
 			refResults = append(refResults, RefResult{
@@ -88,7 +90,7 @@ func VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 				TargetSHA: tgtSHA,
 				Match:     false,
 			})
-			mismatches++
+			extraTgt++
 			if opts.Verbose {
 				fmt.Printf("  EXTRA in target: %s (%s)\n", ref, tgtSHA)
 			}
@@ -97,10 +99,23 @@ func VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 
 	if mismatches > 0 {
 		result.Status = StatusFail
-		result.Details = fmt.Sprintf("%d ref mismatches out of %d total refs", mismatches, len(srcRefs)-excludedCount)
-	} else if excludedCount > 0 {
+		var details strings.Builder
+		details.WriteString(fmt.Sprintf("%d source ref mismatches out of %d checked refs", mismatches, len(srcRefs)-excludedCount))
+		if extraTgt > 0 {
+			details.WriteString(fmt.Sprintf("; %d extra refs in target (expected — prior runs or cleanup commits)", extraTgt))
+		}
+		result.Details = details.String()
+	} else if extraTgt > 0 || excludedCount > 0 {
 		result.Status = StatusWarn
-		result.Details = fmt.Sprintf("All %d checked refs match (%d refs excluded — rejected by remote)", len(srcRefs)-excludedCount, excludedCount)
+		var parts []string
+		parts = append(parts, fmt.Sprintf("All %d source refs match", len(srcRefs)-excludedCount))
+		if extraTgt > 0 {
+			parts = append(parts, fmt.Sprintf("%d extra refs in target (expected — prior runs or cleanup commits)", extraTgt))
+		}
+		if excludedCount > 0 {
+			parts = append(parts, fmt.Sprintf("%d refs excluded — rejected by remote", excludedCount))
+		}
+		result.Details = strings.Join(parts, "; ")
 	} else {
 		result.Details = fmt.Sprintf("All %d refs match", len(srcRefs))
 	}

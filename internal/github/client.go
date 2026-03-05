@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -13,6 +14,18 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// IsRateLimitError returns true if the error is a GitHub rate limit error
+// (primary or secondary/abuse). Callers can use this to skip operations
+// rather than retrying when rate limits are exhausted.
+func IsRateLimitError(err error) bool {
+	var rle *gh.RateLimitError
+	if errors.As(err, &rle) {
+		return true
+	}
+	var arle *gh.AbuseRateLimitError
+	return errors.As(err, &arle)
+}
+
 // Client wraps the GitHub API client for both Cloud and Enterprise.
 type Client struct {
 	API  *gh.Client
@@ -22,6 +35,7 @@ type Client struct {
 
 // NewClient creates a GitHub API client for the given host and token.
 // If token is empty, an unauthenticated client is created (suitable for public repos).
+// All clients automatically handle rate limiting by sleeping until reset.
 func NewClient(host, token string) (*Client, error) {
 	ctx := context.Background()
 
@@ -30,8 +44,13 @@ func NewClient(host, token string) (*Client, error) {
 		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 		httpClient = oauth2.NewClient(ctx, ts)
 		httpClient.Timeout = 5 * time.Minute
+		// Wrap the oauth2 transport with rate limit awareness
+		httpClient.Transport = &rateLimitTransport{base: httpClient.Transport}
 	} else {
-		httpClient = &http.Client{Timeout: 5 * time.Minute}
+		httpClient = &http.Client{
+			Timeout:   5 * time.Minute,
+			Transport: &rateLimitTransport{base: http.DefaultTransport},
+		}
 	}
 
 	var client *gh.Client
@@ -393,4 +412,87 @@ func (c *Client) SearchRepos(org, nameFilter string) ([]string, error) {
 		opts.Page = resp.NextPage
 	}
 	return repos, nil
+}
+
+// maxRateLimitRetries is the maximum number of times to retry after hitting a rate limit.
+const maxRateLimitRetries = 3
+
+// maxRateLimitWait caps how long we'll sleep for a single rate limit reset.
+const maxRateLimitWait = 2 * time.Minute
+
+// rateLimitTransport wraps an http.RoundTripper and automatically retries
+// requests that receive a 403 response with rate limit headers (X-RateLimit-Remaining: 0).
+// It sleeps until the X-RateLimit-Reset time before retrying.
+type rateLimitTransport struct {
+	base http.RoundTripper
+}
+
+func (t *rateLimitTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	for attempt := 0; attempt <= maxRateLimitRetries; attempt++ {
+		resp, err := t.base.RoundTrip(req)
+		if err != nil {
+			return resp, err
+		}
+
+		// Determine wait duration based on rate limit type
+		var wait time.Duration
+		switch {
+		case resp.StatusCode == http.StatusForbidden && resp.Header.Get("X-RateLimit-Remaining") == "0":
+			// Primary rate limit: 403 + X-RateLimit-Remaining: 0
+			resetStr := resp.Header.Get("X-RateLimit-Reset")
+			if resetStr == "" {
+				return resp, nil
+			}
+			var resetEpoch int64
+			if _, scanErr := fmt.Sscanf(resetStr, "%d", &resetEpoch); scanErr != nil {
+				return resp, nil
+			}
+			wait = time.Until(time.Unix(resetEpoch, 0)) + 5*time.Second
+		case resp.StatusCode == http.StatusTooManyRequests:
+			// Secondary/abuse rate limit: 429 + Retry-After header
+			retryAfter := resp.Header.Get("Retry-After")
+			if retryAfter == "" {
+				wait = 60 * time.Second
+			} else {
+				var secs int64
+				if _, scanErr := fmt.Sscanf(retryAfter, "%d", &secs); scanErr != nil {
+					wait = 60 * time.Second
+				} else {
+					wait = time.Duration(secs)*time.Second + 2*time.Second
+				}
+			}
+		default:
+			return resp, nil
+		}
+
+		if attempt == maxRateLimitRetries {
+			return resp, nil
+		}
+		if wait <= 0 {
+			wait = 2 * time.Second
+		}
+		if wait > maxRateLimitWait {
+			fmt.Printf("  ⚠ Rate limit reset too far in the future (%v) — not waiting\n", wait.Truncate(time.Second))
+			return resp, nil
+		}
+		if req.Body != nil && req.GetBody == nil {
+			return resp, nil
+		}
+		resp.Body.Close()
+		fmt.Printf("  ⏳ Rate limited — waiting %v until reset (attempt %d/%d)...\n", wait.Truncate(time.Second), attempt+1, maxRateLimitRetries)
+		select {
+		case <-time.After(wait):
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+		if req.Body != nil {
+			body, bodyErr := req.GetBody()
+			if bodyErr != nil {
+				return nil, fmt.Errorf("cannot retry rate-limited request: %w", bodyErr)
+			}
+			req = req.Clone(req.Context())
+			req.Body = body
+		}
+	}
+	return nil, fmt.Errorf("rate limit retry loop exited unexpectedly")
 }
