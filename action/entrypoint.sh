@@ -114,7 +114,11 @@ if [ -n "${CHECKSUM_ID}" ]; then
 
   if [ -f "${INSTALL_DIR}/checksums.txt" ]; then
     EXPECTED=$(grep "${BINARY_NAME}" "${INSTALL_DIR}/checksums.txt" | awk '{print $1}')
-    ACTUAL=$(sha256sum "${INSTALL_DIR}/vcopy${EXT}" | awk '{print $1}')
+    if [ "${OS}" = "windows" ]; then
+      ACTUAL=$(powershell -Command "(Get-FileHash -Algorithm SHA256 '${INSTALL_DIR}/vcopy${EXT}').Hash.ToLower()")
+    else
+      ACTUAL=$(sha256sum "${INSTALL_DIR}/vcopy${EXT}" | awk '{print $1}')
+    fi
     if [ "${EXPECTED}" != "${ACTUAL}" ]; then
       echo "::error::Checksum mismatch! Expected ${EXPECTED}, got ${ACTUAL}. Binary may be corrupted or tampered with."
       rm -f "${INSTALL_DIR}/vcopy${EXT}"
@@ -140,6 +144,11 @@ VCOPY="${INSTALL_DIR}/vcopy${EXT}"
 ARGS=()
 
 MODE="${INPUT_MODE:-single}"
+
+if [ -z "${INPUT_TARGET_ORG}" ]; then
+  echo "::error::target-org is required and cannot be empty"
+  exit 1
+fi
 
 if [ "${MODE}" = "batch" ]; then
   # Batch mode: vcopy batch <source-org> <target-org> --search <filter>

@@ -181,6 +181,10 @@ copyPRs = true
 copyWiki = true
 }
 
+if verifyOnly && skipVerify {
+return fmt.Errorf("cannot use --verify-only and --skip-verify together")
+}
+
 // Resolve target repo name
 repoName := targetName
 if repoName == "" {
@@ -552,7 +556,10 @@ func batchRun(cmd *cobra.Command, args []string) error {
 
 		// Check if target already exists (skip-existing)
 		if batchSkipExist {
-			exists, _ := tgtClient.RepoExists(targetOrg, targetRepoName)
+			exists, existErr := tgtClient.RepoExists(targetOrg, targetRepoName)
+			if existErr != nil {
+				fmt.Printf("%s ⚠ Warning: could not check if %s/%s exists: %v\n", prefix, targetOrg, targetRepoName, existErr)
+			}
 			if exists {
 				fmt.Printf("%s Skipping %s (target %s/%s already exists)\n", prefix, name, targetOrg, targetRepoName)
 				skipped++

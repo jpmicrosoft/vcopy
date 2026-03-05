@@ -329,8 +329,8 @@ Creates a `git bundle` from each repo (a self-contained archive of all refs and 
 | `--pull-requests` | `false` | Also migrate pull requests as issues in the target (GitHub API does not support creating true PRs) |
 | `--wiki` | `false` | Also copy the repository wiki (if one exists) |
 | `--all-metadata` | `false` | Shorthand for `--issues --pull-requests --wiki` — copies all optional metadata |
-| `--verify-only` | `false` | Run verification checks against an existing source and target without copying anything |
-| `--skip-verify` | `false` | Copy the repo but skip all verification checks (you can verify later with `--verify-only`) |
+| `--verify-only` | `false` | Run verification checks against an existing source and target without copying anything. Cannot be combined with `--skip-verify` |
+| `--skip-verify` | `false` | Copy the repo but skip all verification checks. Verify later in a separate run with `--verify-only`. Cannot be combined with `--verify-only` |
 | `--quick-verify` | `false` | Run only ref comparison and tree hash checks — faster but less thorough than full verification |
 | `--since` | | Only verify objects created after this date (`2025-06-01`) or commit SHA — useful for incremental re-syncs |
 | `--report` | | File path to write a detailed JSON verification report (e.g., `--report audit.json`) |
