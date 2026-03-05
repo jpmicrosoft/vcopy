@@ -69,10 +69,16 @@ func (c *Client) RepoExists(owner, repo string) (bool, error) {
 // CreateRepo creates a repository in the specified organization or user account.
 // It first tries the org endpoint; if the target is a personal account (404), it
 // falls back to creating under the authenticated user.
-func (c *Client) CreateRepo(org, name string, verbose bool) error {
+func (c *Client) CreateRepo(org, name, visibility string, verbose bool) error {
+	switch visibility {
+	case "private", "public", "internal":
+	default:
+		return fmt.Errorf("invalid visibility %q: must be private, public, or internal", visibility)
+	}
+
 	repo := &gh.Repository{
-		Name:    gh.String(name),
-		Private: gh.Bool(true),
+		Name:       gh.String(name),
+		Visibility: gh.String(visibility),
 	}
 
 	_, resp, err := c.API.Repositories.Create(c.ctx, org, repo)

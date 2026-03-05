@@ -198,7 +198,11 @@ ARGS+=("--non-interactive")
 [ -n "${INPUT_TARGET_HOST}" ] && [ "${INPUT_TARGET_HOST}" != "github.com" ] && ARGS+=("--target-host" "${INPUT_TARGET_HOST}")
 [ -n "${INPUT_SOURCE_TOKEN}" ] && ARGS+=("--source-token" "${INPUT_SOURCE_TOKEN}")
 [ -n "${INPUT_TARGET_TOKEN}" ] && ARGS+=("--target-token" "${INPUT_TARGET_TOKEN}")
-[ "${INPUT_PUBLIC}" = "true" ] && ARGS+=("--public")
+# Support both public-source (new) and public (deprecated) inputs
+if [ "${INPUT_PUBLIC_SOURCE}" = "true" ] || [ "${INPUT_PUBLIC}" = "true" ]; then
+  ARGS+=("--public-source")
+fi
+[ -n "${INPUT_VISIBILITY}" ] && ARGS+=("--visibility" "${INPUT_VISIBILITY}")
 [ "${INPUT_LFS}" = "true" ] && ARGS+=("--lfs")
 [ "${INPUT_CODE_ONLY}" = "true" ] && ARGS+=("--code-only")
 [ "${INPUT_SKIP_VERIFY}" = "true" ] && ARGS+=("--skip-verify")

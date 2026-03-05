@@ -85,7 +85,7 @@ func TestApplyConfig_NonInteractive(t *testing.T) {
 		Source:         config.SourceConfig{Repo: "o/r"},
 		Target:         config.TargetConfig{Org: "t"},
 	}
-	applyConfig(cfg)
+	applyConfig(cfg, nil)
 	if !nonInteractive {
 		t.Error("applyConfig should set nonInteractive from config")
 	}
@@ -102,7 +102,7 @@ func TestApplyConfig_NoOverrideWhenSet(t *testing.T) {
 		Source:         config.SourceConfig{Repo: "o/r"},
 		Target:         config.TargetConfig{Org: "t"},
 	}
-	applyConfig(cfg)
+	applyConfig(cfg, nil)
 	if !nonInteractive {
 		t.Error("applyConfig should not reset nonInteractive when already true")
 	}
