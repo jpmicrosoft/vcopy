@@ -92,16 +92,16 @@ func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 	} else if codeOnly {
 		// Code only: push branches, skip tags entirely
 		pushErr := retry.Do(retry.Default(), "git push", func() error {
-			return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--all", tgtURL)
+			return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--all", "--force", tgtURL)
 		})
 		if pushErr != nil {
 			sp.StopFail()
 			return fmt.Errorf("push branches failed: %w", pushErr)
 		}
 	} else {
-		// Additive: push branches + new tags (existing tags preserved)
+		// Additive: force-update branches, push new tags (existing tags preserved)
 		pushErr := retry.Do(retry.Default(), "git push", func() error {
-			return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--all", tgtURL)
+			return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--all", "--force", tgtURL)
 		})
 		if pushErr != nil {
 			sp.StopFail()
