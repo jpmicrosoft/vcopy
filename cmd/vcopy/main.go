@@ -226,7 +226,13 @@ var srcToken, tgtToken string
 var err error
 if publicSource {
 fmt.Println("Public source mode: skipping source authentication")
-if copyIssues || copyPRs {
+if sourceToken != "" {
+	// Use provided token for API calls (higher rate limits) while keeping
+	// git clone unauthenticated (public HTTPS). This avoids the 60 req/hr
+	// unauthenticated API limit for metadata operations like releases.
+	srcToken = sourceToken
+	fmt.Println("  Using --source-token for API calls (5,000 req/hr)")
+} else if copyIssues || copyPRs {
 fmt.Println("Note: Metadata copy from public repos uses unauthenticated API access (60 req/hr rate limit).")
 fmt.Println("      For repos with many issues/PRs/releases, consider providing a source token for higher limits.")
 }
@@ -504,6 +510,10 @@ func batchRun(cmd *cobra.Command, args []string) error {
 	var err error
 	if publicSource {
 		fmt.Println("Public source mode: skipping source authentication")
+		if sourceToken != "" {
+			srcToken = sourceToken
+			fmt.Println("  Using --source-token for API calls (5,000 req/hr)")
+		}
 		tgtToken, err = auth.AuthenticateTarget(authMethod, targetHost, targetToken)
 		if err != nil {
 			return fmt.Errorf("target authentication failed: %w", err)
