@@ -553,6 +553,7 @@ vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public-source 
 | `--prefix` | | Prefix to prepend to each target repo name |
 | `--suffix` | | Suffix to append to each target repo name |
 | `--skip-existing` | `false` | Skip repos that already exist in the target org (useful for resuming interrupted batches) |
+| `--sync` | `false` | Update existing repos (additive push + incremental release sync) instead of skipping them |
 | `--dry-run` | `false` | Preview the full source→target mapping without copying anything |
 | `--report` | | Path to write a combined JSON batch report with all repo results |
 | `--per-repo-report` | `false` | Also write individual JSON reports per repo (e.g., `report-reponame.json`) |
@@ -579,6 +580,7 @@ Target repo names follow the pattern `{prefix}{source-name}{suffix}`:
 - **Progress**: Prints `[N/total] Copying repo-name...` for each repo
 - **Summary**: At the end, prints a report of succeeded/failed/skipped counts (plus releases-skipped if any were skipped due to rate limits)
 - **Resumable**: Use `--skip-existing` to skip repos already created (e.g., after a partial run)
+- **Sync mode**: Use `--sync` to update existing repos — branches are force-updated to match the source, while new tags and releases are added incrementally (existing tags and releases are preserved). New repos are created normally. Mutually exclusive with `--skip-existing`.
 - **Reporting**: Use `--report` to write a combined JSON report; add `--per-repo-report` for individual files per repo
 
 #### Batch Report JSON Schema

@@ -38,6 +38,10 @@ inputs:
     description: 'Skip repos that already exist in the target org (batch mode, useful for resuming)'
     required: false
     default: 'false'
+  sync:
+    description: 'Update existing repos (additive push + incremental release sync) instead of skipping them (batch mode)'
+    required: false
+    default: 'false'
   per-repo-report:
     description: 'Also write individual JSON reports per repo in batch mode (e.g., report-reponame.json)'
     required: false
@@ -194,6 +198,7 @@ runs:
         INPUT_PREFIX: ${{ inputs.prefix }}
         INPUT_SUFFIX: ${{ inputs.suffix }}
         INPUT_SKIP_EXISTING: ${{ inputs.skip-existing }}
+        INPUT_SYNC: ${{ inputs.sync }}
         INPUT_PER_REPO_REPORT: ${{ inputs.per-repo-report }}
         INPUT_SOURCE_HOST: ${{ inputs.source-host }}
         INPUT_TARGET_HOST: ${{ inputs.target-host }}

@@ -54,6 +54,7 @@ batchSearch       string
 batchPrefix       string
 batchSuffix       string
 batchSkipExist    bool
+batchSync         bool
 batchPerRepoReport bool
 batchDelay        time.Duration
 verbose        bool
@@ -128,6 +129,7 @@ Example:
 	bf.StringVar(&batchPrefix, "prefix", "", "Prefix to prepend to each target repo name")
 	bf.StringVar(&batchSuffix, "suffix", "", "Suffix to append to each target repo name")
 	bf.BoolVar(&batchSkipExist, "skip-existing", false, "Skip repos that already exist in the target org (useful for resuming)")
+	bf.BoolVar(&batchSync, "sync", false, "Update existing repos (additive push + incremental release sync) instead of skipping them")
 	bf.StringVar(&reportPath, "report", "", "Path to write combined JSON batch report")
 	bf.BoolVar(&batchPerRepoReport, "per-repo-report", false, "Also write individual JSON reports per repo (e.g., report-reponame.json)")
 	bf.DurationVar(&batchDelay, "batch-delay", 3*time.Second, "Delay between repos to avoid secondary rate limits (e.g., 3s, 5s, 0 to disable)")
@@ -515,6 +517,10 @@ func batchRun(cmd *cobra.Command, args []string) error {
 	sourceOrg := args[0]
 	targetOrg := args[1]
 
+	if batchSkipExist && batchSync {
+		return fmt.Errorf("--skip-existing and --sync are mutually exclusive")
+	}
+
 	if err := validateVisibility(targetVisibility); err != nil {
 		return err
 	}
@@ -558,18 +564,24 @@ func batchRun(cmd *cobra.Command, args []string) error {
 
 	// Dry run: just print the mapping
 	if dryRun {
-		fmt.Println("=== DRY RUN — Batch Copy Plan ===")
+		mode := "Copy"
+		verb := "copied"
+		if batchSync {
+			mode = "Sync"
+			verb = "synced"
+		}
+		fmt.Printf("=== DRY RUN — Batch %s Plan ===\n", mode)
 		fmt.Printf("Source org:  %s (%s)\n", sourceOrg, sourceHost)
 		fmt.Printf("Target org:  %s (%s)\n", targetOrg, targetHost)
 		fmt.Printf("Name format: %s{name}%s\n", batchPrefix, batchSuffix)
-		fmt.Printf("Flags:       no-github=%v, no-workflows=%v, no-actions=%v, no-copilot=%v, skip-verify=%v, code-only=%v\n",
-			noGitHub, noWorkflows, noActions, noCopilot, skipVerify, codeOnly)
+		fmt.Printf("Flags:       no-github=%v, no-workflows=%v, no-actions=%v, no-copilot=%v, skip-verify=%v, code-only=%v, sync=%v\n",
+			noGitHub, noWorkflows, noActions, noCopilot, skipVerify, codeOnly, batchSync)
 		fmt.Println()
 		for i, name := range repos {
 			targetRepoName := batchPrefix + name + batchSuffix
 			fmt.Printf("  [%d/%d] %s/%s → %s/%s\n", i+1, len(repos), sourceOrg, name, targetOrg, targetRepoName)
 		}
-		fmt.Printf("\nTotal: %d repositories would be copied.\n", len(repos))
+		fmt.Printf("\nTotal: %d repositories would be %s.\n", len(repos), verb)
 		return nil
 	}
 
@@ -624,9 +636,13 @@ func batchRun(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		fmt.Printf("\n%s Copying %s → %s/%s\n", prefix, sourceRepo, targetOrg, targetRepoName)
+		if batchSync {
+			fmt.Printf("\n%s Syncing %s → %s/%s\n", prefix, sourceRepo, targetOrg, targetRepoName)
+		} else {
+			fmt.Printf("\n%s Copying %s → %s/%s\n", prefix, sourceRepo, targetOrg, targetRepoName)
+		}
 
-		verifyResult, hitRL, err := copyOneRepo(srcClient, tgtClient, sourceOrg, name, targetOrg, targetRepoName, srcToken, tgtToken, excludeList, rateLimitHit)
+		verifyResult, hitRL, err := copyOneRepo(srcClient, tgtClient, sourceOrg, name, targetOrg, targetRepoName, srcToken, tgtToken, excludeList, rateLimitHit, batchSync)
 
 		// If the error is a secondary rate limit, wait and retry once.
 		// Note: the rateLimitTransport already retried 3 times with up to 2-min waits each.
@@ -639,7 +655,7 @@ func batchRun(cmd *cobra.Command, args []string) error {
 			if retryAfter <= 10*time.Minute {
 				fmt.Printf("%s ⏳ Secondary rate limit hit — waiting %v before retrying...\n", prefix, retryAfter.Truncate(time.Second))
 				time.Sleep(retryAfter + 5*time.Second)
-				verifyResult, hitRL, err = copyOneRepo(srcClient, tgtClient, sourceOrg, name, targetOrg, targetRepoName, srcToken, tgtToken, excludeList, rateLimitHit)
+				verifyResult, hitRL, err = copyOneRepo(srcClient, tgtClient, sourceOrg, name, targetOrg, targetRepoName, srcToken, tgtToken, excludeList, rateLimitHit, batchSync)
 			} else {
 				fmt.Printf("%s ⚠ Secondary rate limit hit but retry-after too long (%v) — skipping retry\n", prefix, retryAfter.Truncate(time.Second))
 			}
@@ -751,27 +767,48 @@ func batchRun(cmd *cobra.Command, args []string) error {
 // If skipReleases is true, release copying is skipped entirely (used when rate limited).
 // Returns the verification report (nil if verification was skipped), whether a rate
 // limit error was encountered during release copy, and any fatal error.
-func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targetOrg, targetRepoName, srcToken, tgtToken string, excludeList []string, skipReleases bool) (*verify.VerificationReport, bool, error) {
-	// Create target repo
-	if err := tgtClient.CreateRepo(targetOrg, targetRepoName, targetVisibility, verbose); err != nil {
-		return nil, false, fmt.Errorf("create repo: %w", err)
+func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targetOrg, targetRepoName, srcToken, tgtToken string, excludeList []string, skipReleases, syncMode bool) (*verify.VerificationReport, bool, error) {
+	// Determine if target already exists
+	repoExists := false
+	if syncMode {
+		exists, err := tgtClient.RepoExists(targetOrg, targetRepoName)
+		if err != nil {
+			fmt.Printf("  Warning: could not check if target exists: %v\n", err)
+		}
+		repoExists = exists
+		if exists && verbose {
+			fmt.Printf("  Target exists — syncing (additive push + incremental releases)\n")
+		}
 	}
 
-	// Mirror
+	// Create target repo (skip if sync mode confirmed it exists)
+	if !repoExists {
+		if err := tgtClient.CreateRepo(targetOrg, targetRepoName, targetVisibility, verbose); err != nil {
+			return nil, false, fmt.Errorf("create repo: %w", err)
+		}
+	}
+
+	// Mirror (always additive: forceOverwrite=false)
 	rejectedRefs, err := vcopy.MirrorRepo(sourceHost, srcOwner, srcName, targetHost, targetOrg, targetRepoName, srcToken, tgtToken, lfs, false, codeOnly, verbose)
 	if err != nil {
 		return nil, false, fmt.Errorf("mirror: %w", err)
 	}
 
-	// Copy releases (unless code-only or rate-limited)
+	// Copy/sync releases (unless code-only or rate-limited)
 	hitRateLimit := false
 	if !codeOnly && !skipReleases {
-		if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, targetRepoName, verbose); err != nil {
-			if ghclient.IsRateLimitError(err) {
+		var releaseErr error
+		if syncMode && repoExists {
+			releaseErr = vcopy.SyncReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, targetRepoName, verbose)
+		} else {
+			releaseErr = vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, targetRepoName, verbose)
+		}
+		if releaseErr != nil {
+			if ghclient.IsRateLimitError(releaseErr) {
 				hitRateLimit = true
 				fmt.Printf("  ⚠ Release copy skipped: API rate limit exhausted\n")
 			} else {
-				fmt.Printf("  Warning: release copy failed: %v\n", err)
+				fmt.Printf("  Warning: release copy failed: %v\n", releaseErr)
 			}
 		}
 	} else if skipReleases && !codeOnly {

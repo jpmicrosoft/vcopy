@@ -35,6 +35,7 @@ No setup required — the action is publicly available from the GitHub Marketpla
 | `prefix` | | | Prefix for target repo names (batch mode) |
 | `suffix` | | | Suffix for target repo names (batch mode) |
 | `skip-existing` | | `false` | Skip repos already in target org (batch mode, for resuming) |
+| `sync` | | `false` | Update existing repos (additive push + incremental release sync) instead of skipping them (batch mode). Mutually exclusive with `skip-existing`. |
 | `per-repo-report` | | `false` | Also write individual JSON reports per repo in batch mode (e.g., `report-reponame.json`) |
 | `source-token` | | | PAT for the source instance (not needed for public repos) |
 | `source-host` | | `github.com` | Source GitHub hostname |
@@ -65,6 +66,7 @@ No setup required — the action is publicly available from the GitHub Marketpla
 | `no-github` | | `false` | Exclude entire `.github/` directory (supersedes `no-workflows`, `no-actions`, `no-copilot`) |
 | `dry-run` | | `false` | Show what would be done without making changes |
 | `exclude` | | | Comma-separated paths to exclude from the target |
+| `batch-delay` | | `3s` | Delay between repos in batch mode to avoid secondary rate limits (e.g., `5s`, `0s` to disable) |
 
 > **Note**: `CODEOWNERS` files (`CODEOWNERS`, `.github/CODEOWNERS`, `docs/CODEOWNERS`) are **always removed** on every copy because they reference source org teams/users that won't exist in the target.
 
@@ -270,6 +272,23 @@ jobs:
           source-token: ${{ secrets.SOURCE_GITHUB_TOKEN }}
           target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
 ```
+
+### Batch sync (update existing repos)
+
+```yaml
+      - uses: jpmicrosoft/vcopy@v1
+        with:
+          mode: batch
+          source-org: Azure
+          target-org: my-org
+          search: 'terraform-azurerm-avm-'
+          public-source: true
+          no-github: true
+          sync: true
+          target-token: ${{ secrets.TARGET_GITHUB_TOKEN }}
+```
+
+> Sync mode force-updates branches to match the source, adds new tags and releases incrementally (existing tags and releases are preserved), and creates any repos that don't yet exist. Mutually exclusive with `skip-existing`.
 
 ### Batch copy with audit report
 
