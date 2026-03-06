@@ -335,3 +335,6 @@ The action uses `GITHUB_TOKEN` to download binaries. For private repos, ensure t
 - Check that tokens have the `repo` scope
 - For Enterprise, ensure the hostname is correct (`target-host: github.mycompany.com`)
 - For public repos, set `public-source: true` to skip source authentication
+
+### Verification failures
+If a verification check reports FAIL or WARN, see [Verification Failure Troubleshooting](../README.md#verification-failure-troubleshooting) in the main README for per-check cause tables and resolution steps.

@@ -320,6 +320,84 @@ Uses `git log --all --format=%H %G?` on both repos to enumerate all commits and 
 ### 5. Bundle Integrity Verification
 Creates a `git bundle` from each repo (a self-contained archive of all refs and objects). Verifies each bundle passes `git bundle verify` (structural integrity). Then compares the refs listed inside each bundle using `git bundle list-heads` — all source bundle refs must be present with matching SHAs in the target bundle (missing or mismatched = FAIL). Extra refs in the target bundle (from prior runs in additive mode) produce a WARN. SHA-256 checksums of each bundle file are included in the report for audit purposes, but are not compared directly because git bundle packing is non-deterministic.
 
+## Verification Failure Troubleshooting
+
+When a verification check reports **FAIL** or **WARN**, the tables below list the most common causes and whether each represents a real integrity problem or a benign condition you can safely accept.
+
+> **Why timing matters:** Each verification check independently queries or clones the source and target repositories. The 5 checks run sequentially, so there is a window (typically seconds to minutes depending on repo size) during which the source may receive new commits. When this happens, earlier checks may see one state of the source while later checks see a different state. This is the most common cause of isolated failures — especially for the bundle check, which runs last.
+
+> **Tip:** Re-run the failing repo with `--verbose` to see exactly which refs, objects, or SHAs differ.
+
+### 1. Branch/Tag Ref Comparison — Failure Causes
+
+| Cause | Real problem? | What to do |
+|-------|:---:|------------|
+| **Target branch protection rejected a branch during push** | No | vcopy auto-excludes rejected branches (WARN). If you see FAIL instead, check that the rejected branch is listed in the push output — it should be excluded automatically. Re-run on latest version if not. |
+| **Source repo was updated after the copy** | No | The source received new commits between copy and verification. Re-run with `--verify-only` to compare current state, or accept if you know the source moved. |
+| **Incomplete push (network interruption)** | Yes | Some branches or tags didn't reach the target. Re-run the copy (additive mode won't destroy existing content). |
+| **Token lacks push permissions** | Yes | Target token needs `repo` scope with write access. Check for 403/permission errors in the output. |
+
+### 2. Git Object Hash Verification — Failure Causes
+
+| Cause | Real problem? | What to do |
+|-------|:---:|------------|
+| **Source repo received new commits during verification** | No | Each check clones independently. If the source was updated between the ref check and the object check, objects may differ. Re-run with `--verify-only`. |
+| **Incomplete push** | Yes | Some objects weren't transferred. Re-run the copy. |
+| **Target garbage collection removed unreachable objects** (self-hosted targets) | Depends | If a self-hosted GitHub Enterprise target ran `git gc` aggressively, unreachable objects may have been pruned. GitHub.com manages GC automatically. Re-run the copy to restore them. |
+| **Branch protection prevented pushing all content** | No | Objects only reachable from rejected branches are excluded. If the check still fails, a non-standard ref namespace may contain source-only objects (see Bundle section below). |
+
+### 3. Tree Hash Comparison — Failure Causes
+
+| Cause | Real problem? | What to do |
+|-------|:---:|------------|
+| **Source branch received new commits during verification** | No | The tree hash at the branch tip changed. Re-run with `--verify-only`. |
+| **Branch was force-pushed on source after copy** | No | Source history was rewritten — the tree at the branch tip differs. Re-copy if you need the latest state. |
+| **Incomplete push** | Yes | The branch tip commit or its tree wasn't fully transferred. Re-run the copy. |
+| **CODEOWNERS or path exclusion applied** | No | Post-copy cleanup commits change the target's tree. These run *after* verification, so they shouldn't cause failures. If they do, it indicates a bug — please report it. |
+
+### 4. Commit Signature Verification — Failure and Warning Causes
+
+This check produces **WARN** (not FAIL) when signatures are lost — this is expected because additive push preserves signatures in most cases. **FAIL** only occurs for infrastructure errors.
+
+| Cause | Status | Real problem? | What to do |
+|-------|:------:|:---:|------------|
+| **Clone or git command failure** | FAIL | Yes | Infrastructure error (network, auth, corrupted repo). Re-run the copy. |
+| **Signatures not preserved during transfer** | WARN | Depends | Some transfer methods can strip GPG/SSH commit signatures. If you need signatures preserved, verify with `git log --show-signature` on the target. |
+| **GPG/SSH keys not available in verification environment** | — | No | Not a problem. The check compares signature *presence* (`%G?` status ≠ `N`), not cryptographic validity — missing keys return `E` (cannot check), which still counts as "signed." |
+| **Source has signed commits, target has same commits unsigned** | WARN | Depends | Can happen if commits were recreated (rebase, amend). Additive push should preserve signatures — if missing, it may indicate the push method altered commits. |
+
+### 5. Bundle Integrity Verification — Failure Causes
+
+| Cause | Real problem? | What to do |
+|-------|:---:|------------|
+| **Source repo updated during verification (most common)** | No | The bundle check runs last. If the source received a push between earlier checks and the bundle check, the bundle sees newer source content the target doesn't have. All other checks pass but the bundle fails. **Re-run with `--verify-only` to confirm.** |
+| **Non-standard refs in source** (`refs/notes/*`, `refs/replace/*`) | Unlikely | Bundle verification uses `git clone --bare`, which only fetches `refs/heads/*` and `refs/tags/*` — non-standard namespaces are not included. This scenario is theoretically possible if the remote advertises them, but uncommon in practice. |
+| **Branch protection rejected a branch** | No | Rejected branches are excluded from the source bundle. If the check still fails, see "source updated during verification" above. |
+| **Corrupted packfile during transfer** | Yes | Rare. The bundle verification (`git bundle verify`) catches structural corruption. If the bundle itself is invalid, the error message will say "bundle verify failed." Re-run the copy. |
+| **Bundle creation fails on empty repo** | — | If the target has no refs at all (all branches rejected, no tags), bundle creation may fail. This is reported as "Target bundle failed" — not an integrity issue. |
+
+### Quick Reference: Is My Failure Safe to Accept?
+
+| Scenario | Safe? | Explanation |
+|----------|:-----:|-------------|
+| All checks PASS except Bundle → FAIL | Usually yes | Most commonly caused by the source repo receiving a push during verification. Re-run `--verify-only` to confirm. |
+| Ref Comparison → FAIL, others PASS | Investigate | A ref was missing or mismatched. Could be source updated or incomplete push. |
+| Object Hashes → FAIL, others PASS | Investigate | Objects are missing. May need to re-copy. |
+| Tree Comparison → FAIL | Investigate | Branch content differs. Check if source was force-pushed. |
+| Signatures → WARN, others PASS | Yes | Signature preservation is best-effort. Content integrity is confirmed by the other checks. Lost signatures produce WARN, not FAIL. |
+| Signatures → FAIL, others PASS | Investigate | FAIL in signatures means a clone or git command failed — infrastructure error, not a signature issue. |
+| Multiple checks → FAIL | Investigate | Likely an incomplete copy or network issue. Re-run the copy. |
+
+### Mode-Dependent Skip Behavior
+
+| Check | Full mode | Quick mode (`--quick-verify`) | Code-only (`--code-only`) |
+|-------|:---------:|:---:|:---:|
+| Branch/Tag Ref Comparison | ✓ Runs | ✓ Runs | ⊘ Skipped (tags not copied) |
+| Git Object Hash Verification | ✓ Runs | ⊘ Skipped | ✓ Runs |
+| Tree Hash Comparison | ✓ Runs | ✓ Runs | ✓ Runs |
+| Commit Signature Verification | ✓ Runs | ⊘ Skipped | ✓ Runs |
+| Bundle Integrity Verification | ✓ Runs | ⊘ Skipped | ⊘ Skipped (tags not copied) |
+
 ## Flags Reference
 
 | Flag | Default | Description |
