@@ -214,6 +214,7 @@ fi
 [ "${INPUT_NO_GITHUB}" = "true" ] && ARGS+=("--no-github")
 [ "${INPUT_DRY_RUN}" = "true" ] && ARGS+=("--dry-run")
 [ -n "${INPUT_EXCLUDE}" ] && ARGS+=("--exclude" "${INPUT_EXCLUDE}")
+[ -n "${INPUT_BATCH_DELAY}" ] && [ "${MODE}" = "batch" ] && ARGS+=("--batch-delay" "${INPUT_BATCH_DELAY}")
 
 # ──────────────────────────────────────────────
 # 6. Run vcopy (tokens are masked by GitHub Actions automatically)

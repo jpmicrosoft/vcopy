@@ -55,6 +55,7 @@ batchPrefix       string
 batchSuffix       string
 batchSkipExist    bool
 batchPerRepoReport bool
+batchDelay        time.Duration
 verbose        bool
 dryRun         bool
 nonInteractive bool
@@ -129,6 +130,7 @@ Example:
 	bf.BoolVar(&batchSkipExist, "skip-existing", false, "Skip repos that already exist in the target org (useful for resuming)")
 	bf.StringVar(&reportPath, "report", "", "Path to write combined JSON batch report")
 	bf.BoolVar(&batchPerRepoReport, "per-repo-report", false, "Also write individual JSON reports per repo (e.g., report-reponame.json)")
+	bf.DurationVar(&batchDelay, "batch-delay", 3*time.Second, "Delay between repos to avoid secondary rate limits (e.g., 3s, 5s, 0 to disable)")
 	batchCmd.MarkFlagRequired("search")
 	// Shared flags inherited by batch
 	bf.StringVar(&sourceHost, "source-host", "github.com", "Source GitHub host")
@@ -595,6 +597,11 @@ func batchRun(cmd *cobra.Command, args []string) error {
 	rateLimitHit := false
 
 	for i, name := range repos {
+		// Batch pacing: sleep between repos to avoid secondary rate limits
+		if i > 0 && batchDelay > 0 {
+			time.Sleep(batchDelay)
+		}
+
 		targetRepoName := batchPrefix + name + batchSuffix
 		sourceRepo := sourceOrg + "/" + name
 		prefix := fmt.Sprintf("[%d/%d]", i+1, len(repos))
@@ -620,6 +627,24 @@ func batchRun(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\n%s Copying %s → %s/%s\n", prefix, sourceRepo, targetOrg, targetRepoName)
 
 		verifyResult, hitRL, err := copyOneRepo(srcClient, tgtClient, sourceOrg, name, targetOrg, targetRepoName, srcToken, tgtToken, excludeList, rateLimitHit)
+
+		// If the error is a secondary rate limit, wait and retry once.
+		// Note: the rateLimitTransport already retried 3 times with up to 2-min waits each.
+		// This batch-level retry gives one more attempt after the full reset period.
+		if err != nil && ghclient.IsRateLimitError(err) {
+			retryAfter := ghclient.RetryAfterFromError(err)
+			if retryAfter <= 0 {
+				retryAfter = 60 * time.Second
+			}
+			if retryAfter <= 10*time.Minute {
+				fmt.Printf("%s ⏳ Secondary rate limit hit — waiting %v before retrying...\n", prefix, retryAfter.Truncate(time.Second))
+				time.Sleep(retryAfter + 5*time.Second)
+				verifyResult, hitRL, err = copyOneRepo(srcClient, tgtClient, sourceOrg, name, targetOrg, targetRepoName, srcToken, tgtToken, excludeList, rateLimitHit)
+			} else {
+				fmt.Printf("%s ⚠ Secondary rate limit hit but retry-after too long (%v) — skipping retry\n", prefix, retryAfter.Truncate(time.Second))
+			}
+		}
+
 		if hitRL && !rateLimitHit {
 			rateLimitHit = true
 			remaining := len(repos) - i - 1

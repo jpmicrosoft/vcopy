@@ -26,6 +26,17 @@ func IsRateLimitError(err error) bool {
 	return errors.As(err, &arle)
 }
 
+// RetryAfterFromError extracts the retry-after duration from a GitHub
+// AbuseRateLimitError. Returns 0 if the error is not an abuse rate limit
+// error or has no RetryAfter set.
+func RetryAfterFromError(err error) time.Duration {
+	var arle *gh.AbuseRateLimitError
+	if errors.As(err, &arle) && arle.RetryAfter != nil {
+		return *arle.RetryAfter
+	}
+	return 0
+}
+
 // Client wraps the GitHub API client for both Cloud and Enterprise.
 type Client struct {
 	API  *gh.Client
@@ -422,12 +433,28 @@ const maxRateLimitWait = 2 * time.Minute
 
 // rateLimitTransport wraps an http.RoundTripper and automatically retries
 // requests that hit GitHub rate limits:
-//   - Primary (403 with X-RateLimit-Remaining: 0): sleeps until X-RateLimit-Reset + 5 s buffer.
+//   - Secondary/abuse (403 + Retry-After): sleeps for Retry-After + 2 s buffer (60 s if unparseable).
 //   - Secondary/abuse (429 Too Many Requests): sleeps for Retry-After + 2 s buffer (60 s if header absent).
+//   - Primary (403 with X-RateLimit-Remaining: 0): sleeps until X-RateLimit-Reset + 5 s buffer.
 //
-// Both paths retry up to maxRateLimitRetries times, capped at maxRateLimitWait per sleep.
+// All three paths retry up to maxRateLimitRetries times, capped at maxRateLimitWait per sleep.
+// Retry-After is checked before X-RateLimit-Remaining to correctly handle secondary 403s
+// that may also carry primary rate limit headers.
 type rateLimitTransport struct {
 	base http.RoundTripper
+}
+
+// parseRetryAfter parses a Retry-After header value (seconds) and returns
+// the wait duration with a 2-second buffer. Returns 60s if empty or unparseable.
+func parseRetryAfter(header string) time.Duration {
+	if header == "" {
+		return 60 * time.Second
+	}
+	var secs int64
+	if _, err := fmt.Sscanf(header, "%d", &secs); err != nil {
+		return 60 * time.Second
+	}
+	return time.Duration(secs)*time.Second + 2*time.Second
 }
 
 func (t *rateLimitTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -437,9 +464,17 @@ func (t *rateLimitTransport) RoundTrip(req *http.Request) (*http.Response, error
 			return resp, err
 		}
 
-		// Determine wait duration based on rate limit type
+		// Determine wait duration based on rate limit type.
+		// Retry-After is checked first: secondary 403s may also carry
+		// X-RateLimit-Remaining: 0, but Retry-After is the definitive signal.
 		var wait time.Duration
 		switch {
+		case resp.StatusCode == http.StatusForbidden && resp.Header.Get("Retry-After") != "":
+			// Secondary/abuse rate limit: 403 + Retry-After header
+			wait = parseRetryAfter(resp.Header.Get("Retry-After"))
+		case resp.StatusCode == http.StatusTooManyRequests:
+			// Secondary/abuse rate limit: 429 + Retry-After header
+			wait = parseRetryAfter(resp.Header.Get("Retry-After"))
 		case resp.StatusCode == http.StatusForbidden && resp.Header.Get("X-RateLimit-Remaining") == "0":
 			// Primary rate limit: 403 + X-RateLimit-Remaining: 0
 			resetStr := resp.Header.Get("X-RateLimit-Reset")
@@ -451,19 +486,6 @@ func (t *rateLimitTransport) RoundTrip(req *http.Request) (*http.Response, error
 				return resp, nil
 			}
 			wait = time.Until(time.Unix(resetEpoch, 0)) + 5*time.Second
-		case resp.StatusCode == http.StatusTooManyRequests:
-			// Secondary/abuse rate limit: 429 + Retry-After header
-			retryAfter := resp.Header.Get("Retry-After")
-			if retryAfter == "" {
-				wait = 60 * time.Second
-			} else {
-				var secs int64
-				if _, scanErr := fmt.Sscanf(retryAfter, "%d", &secs); scanErr != nil {
-					wait = 60 * time.Second
-				} else {
-					wait = time.Duration(secs)*time.Second + 2*time.Second
-				}
-			}
 		default:
 			return resp, nil
 		}

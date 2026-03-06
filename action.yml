@@ -166,6 +166,10 @@ inputs:
     description: 'Comma-separated list of additional paths to exclude from the target'
     required: false
     default: ''
+  batch-delay:
+    description: 'Delay between repos in batch mode to avoid secondary rate limits (e.g., 3s, 5s, 0s to disable)'
+    required: false
+    default: '3s'
 
 outputs:
   verification-status:
@@ -220,6 +224,7 @@ runs:
         INPUT_NO_GITHUB: ${{ inputs.no-github }}
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_EXCLUDE: ${{ inputs.exclude }}
+        INPUT_BATCH_DELAY: ${{ inputs.batch-delay }}
         GH_TOKEN: ${{ github.token }}
         VCOPY_ACTION_REPO: ${{ github.action_repository }}
       run: ${{ github.action_path }}/action/entrypoint.sh
