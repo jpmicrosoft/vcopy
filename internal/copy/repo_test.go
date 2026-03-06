@@ -6,9 +6,9 @@ import (
 
 func TestSanitizeRepoName(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input string
-		want string
+		want  string
 	}{
 		{"normal name", "my-repo", "my-repo"},
 		{"path traversal", "../../../etc/passwd", "passwd"},

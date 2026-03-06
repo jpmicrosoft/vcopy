@@ -79,13 +79,13 @@ type CheckResult struct {
 
 // VerificationReport holds all verification results.
 type VerificationReport struct {
-	SourceRepo string        `json:"source_repo"`
-	TargetRepo string        `json:"target_repo"`
-	SourceHost string        `json:"source_host"`
-	TargetHost string        `json:"target_host"`
-	Timestamp  time.Time     `json:"timestamp"`
-	Checks     []CheckResult `json:"checks"`
-	Attestation *Attestation `json:"attestation,omitempty"`
+	SourceRepo  string        `json:"source_repo"`
+	TargetRepo  string        `json:"target_repo"`
+	SourceHost  string        `json:"source_host"`
+	TargetHost  string        `json:"target_host"`
+	Timestamp   time.Time     `json:"timestamp"`
+	Checks      []CheckResult `json:"checks"`
+	Attestation *Attestation  `json:"attestation,omitempty"`
 }
 
 // Attestation holds the GPG signature of the report.
@@ -107,7 +107,7 @@ func (r *VerificationReport) AllPassed() bool {
 // Options controls which verification checks to run.
 type Options struct {
 	QuickMode    bool
-	CodeOnly     bool     // skip tag-dependent checks (ref comparison, bundle)
+	CodeOnly     bool // skip tag-dependent checks (ref comparison, bundle)
 	Verbose      bool
 	ExcludedRefs []string // full ref names (e.g. "refs/heads/main") to exclude from comparison
 }

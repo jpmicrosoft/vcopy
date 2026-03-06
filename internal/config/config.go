@@ -9,18 +9,18 @@ import (
 
 // Config represents the YAML configuration file.
 type Config struct {
-	Source   SourceConfig   `yaml:"source"`
-	Target   TargetConfig   `yaml:"target"`
-	Auth     AuthConfig     `yaml:"auth"`
-	Copy     CopyConfig     `yaml:"copy"`
-	Verify   VerifyConfig   `yaml:"verify"`
-	Report   ReportConfig   `yaml:"report"`
-	Exclude  ExcludeConfig  `yaml:"exclude"`
-	LFS            bool           `yaml:"lfs"`
-	Force          bool           `yaml:"force"`
-	CodeOnly       bool           `yaml:"code_only"`
-	NonInteractive bool           `yaml:"non_interactive"`
-	Verbose        bool           `yaml:"verbose"`
+	Source         SourceConfig  `yaml:"source"`
+	Target         TargetConfig  `yaml:"target"`
+	Auth           AuthConfig    `yaml:"auth"`
+	Copy           CopyConfig    `yaml:"copy"`
+	Verify         VerifyConfig  `yaml:"verify"`
+	Report         ReportConfig  `yaml:"report"`
+	Exclude        ExcludeConfig `yaml:"exclude"`
+	LFS            bool          `yaml:"lfs"`
+	Force          bool          `yaml:"force"`
+	CodeOnly       bool          `yaml:"code_only"`
+	NonInteractive bool          `yaml:"non_interactive"`
+	Verbose        bool          `yaml:"verbose"`
 }
 
 // ExcludeConfig holds path exclusion settings.
@@ -72,7 +72,7 @@ type VerifyConfig struct {
 
 // ReportConfig holds report settings.
 type ReportConfig struct {
-	Path   string `yaml:"path"`
+	Path    string `yaml:"path"`
 	SignKey string `yaml:"sign_key"`
 }
 
