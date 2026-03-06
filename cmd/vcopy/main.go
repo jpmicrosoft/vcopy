@@ -1,109 +1,109 @@
 package main
 
 import (
-"bufio"
-"fmt"
-"os"
-"path/filepath"
-"strings"
-"time"
+	"bufio"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
-"github.com/jpmicrosoft/vcopy/internal/auth"
-"github.com/jpmicrosoft/vcopy/internal/config"
-vcopy "github.com/jpmicrosoft/vcopy/internal/copy"
-ghclient "github.com/jpmicrosoft/vcopy/internal/github"
-"github.com/jpmicrosoft/vcopy/internal/report"
-"github.com/jpmicrosoft/vcopy/internal/verify"
-"github.com/spf13/cobra"
-"github.com/spf13/pflag"
+	"github.com/jpmicrosoft/vcopy/internal/auth"
+	"github.com/jpmicrosoft/vcopy/internal/config"
+	vcopy "github.com/jpmicrosoft/vcopy/internal/copy"
+	ghclient "github.com/jpmicrosoft/vcopy/internal/github"
+	"github.com/jpmicrosoft/vcopy/internal/report"
+	"github.com/jpmicrosoft/vcopy/internal/verify"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // version is set at build time via -ldflags "-X main.version=..."
 var version = "dev"
 
 var (
-sourceHost       string
-targetHost       string
-targetName       string
-targetVisibility string
-authMethod       string
-sourceToken      string
-targetToken      string
-publicSource     bool
-lfs              bool
-force            bool
-codeOnly         bool
-copyIssues       bool
-copyPRs          bool
-copyWiki         bool
-allMetadata      bool
-verifyOnly       bool
-skipVerify       bool
-quickVerify      bool
-since            string
-reportPath       string
-signKey          string
-configPath       string
-noWorkflows    bool
-noCopilot      bool
-noActions      bool
-noGitHub       bool
-excludePaths   []string
-// batch subcommand flags
-batchSearch       string
-batchPrefix       string
-batchSuffix       string
-batchSkipExist    bool
-batchSync         bool
-batchPerRepoReport bool
-batchDelay        time.Duration
-verbose        bool
-dryRun         bool
-nonInteractive bool
+	sourceHost       string
+	targetHost       string
+	targetName       string
+	targetVisibility string
+	authMethod       string
+	sourceToken      string
+	targetToken      string
+	publicSource     bool
+	lfs              bool
+	force            bool
+	codeOnly         bool
+	copyIssues       bool
+	copyPRs          bool
+	copyWiki         bool
+	allMetadata      bool
+	verifyOnly       bool
+	skipVerify       bool
+	quickVerify      bool
+	since            string
+	reportPath       string
+	signKey          string
+	configPath       string
+	noWorkflows      bool
+	noCopilot        bool
+	noActions        bool
+	noGitHub         bool
+	excludePaths     []string
+	// batch subcommand flags
+	batchSearch        string
+	batchPrefix        string
+	batchSuffix        string
+	batchSkipExist     bool
+	batchSync          bool
+	batchPerRepoReport bool
+	batchDelay         time.Duration
+	verbose            bool
+	dryRun             bool
+	nonInteractive     bool
 )
 
 func main() {
-rootCmd := &cobra.Command{
-Use:     "vcopy <source-repo> <target-org>",
-	Version: version,
-Short: "Verified GitHub repository copy tool",
-Long: `vcopy copies a GitHub repository to a target organization (Cloud or Enterprise)
+	rootCmd := &cobra.Command{
+		Use:     "vcopy <source-repo> <target-org>",
+		Version: version,
+		Short:   "Verified GitHub repository copy tool",
+		Long: `vcopy copies a GitHub repository to a target organization (Cloud or Enterprise)
 with comprehensive integrity verification to ensure the copy has not been tampered with.
 
 It performs a bare mirror clone of all branches, tags, and history, then runs a
 5-layer verification suite: object hashes, ref comparison, tree hashes, commit
 signatures, and git bundle integrity.`,
-Args: cobra.RangeArgs(0, 2),
-RunE: run,
-}
+		Args: cobra.RangeArgs(0, 2),
+		RunE: run,
+	}
 
-f := rootCmd.Flags()
-f.StringVar(&configPath, "config", "", "Path to YAML config file")
-f.StringVar(&sourceHost, "source-host", "github.com", "Source GitHub host")
-f.StringVar(&targetHost, "target-host", "github.com", "Target GitHub host")
-f.StringVar(&targetName, "target-name", "", "Target repo name (default: same as source)")
-f.StringVar(&authMethod, "auth-method", "auto", "Auth method: auto, gh, pat")
-f.StringVar(&sourceToken, "source-token", "", "PAT for source (if auth-method=pat)")
-f.StringVar(&targetToken, "target-token", "", "PAT for target (if auth-method=pat)")
-f.BoolVar(&publicSource, "public-source", false, "Source repo is public (skip source authentication)")
-f.BoolVar(&publicSource, "public", false, "Source repo is public (skip source authentication)")
-_ = f.MarkDeprecated("public", "use --public-source instead")
-f.StringVar(&targetVisibility, "visibility", "private", "Target repo visibility: private, public, or internal")
-f.BoolVar(&lfs, "lfs", false, "Include Git LFS objects in copy")
-f.BoolVar(&force, "force", false, "Force push to existing target repo (WARNING: overwrites all branches/tags)")
-f.BoolVar(&codeOnly, "code-only", false, "Copy source code only (branches/commits, no tags, releases, or metadata)")
-f.BoolVar(&copyIssues, "issues", false, "Copy issues")
-f.BoolVar(&copyPRs, "pull-requests", false, "Copy pull requests")
-f.BoolVar(&copyWiki, "wiki", false, "Copy wiki")
-f.BoolVar(&allMetadata, "all-metadata", false, "Copy all metadata (issues, PRs, wiki)")
-f.BoolVar(&verifyOnly, "verify-only", false, "Skip copy, only verify existing source vs target")
-f.BoolVar(&skipVerify, "skip-verify", false, "Skip verification (copy only)")
-f.BoolVar(&quickVerify, "quick-verify", false, "Quick verification (refs + tree hashes only)")
-f.StringVar(&since, "since", "", "Incremental verify: only check objects after this SHA or date")
-f.StringVar(&reportPath, "report", "", "Path to write JSON verification report")
-f.StringVar(&signKey, "sign", "", "GPG key ID to sign the verification report (Attestation Signature)")
-f.BoolVar(&verbose, "verbose", false, "Verbose output")
-f.BoolVar(&dryRun, "dry-run", false, "Show what would be done without making changes")
+	f := rootCmd.Flags()
+	f.StringVar(&configPath, "config", "", "Path to YAML config file")
+	f.StringVar(&sourceHost, "source-host", "github.com", "Source GitHub host")
+	f.StringVar(&targetHost, "target-host", "github.com", "Target GitHub host")
+	f.StringVar(&targetName, "target-name", "", "Target repo name (default: same as source)")
+	f.StringVar(&authMethod, "auth-method", "auto", "Auth method: auto, gh, pat")
+	f.StringVar(&sourceToken, "source-token", "", "PAT for source (if auth-method=pat)")
+	f.StringVar(&targetToken, "target-token", "", "PAT for target (if auth-method=pat)")
+	f.BoolVar(&publicSource, "public-source", false, "Source repo is public (skip source authentication)")
+	f.BoolVar(&publicSource, "public", false, "Source repo is public (skip source authentication)")
+	_ = f.MarkDeprecated("public", "use --public-source instead")
+	f.StringVar(&targetVisibility, "visibility", "private", "Target repo visibility: private, public, or internal")
+	f.BoolVar(&lfs, "lfs", false, "Include Git LFS objects in copy")
+	f.BoolVar(&force, "force", false, "Force push to existing target repo (WARNING: overwrites all branches/tags)")
+	f.BoolVar(&codeOnly, "code-only", false, "Copy source code only (branches/commits, no tags, releases, or metadata)")
+	f.BoolVar(&copyIssues, "issues", false, "Copy issues")
+	f.BoolVar(&copyPRs, "pull-requests", false, "Copy pull requests")
+	f.BoolVar(&copyWiki, "wiki", false, "Copy wiki")
+	f.BoolVar(&allMetadata, "all-metadata", false, "Copy all metadata (issues, PRs, wiki)")
+	f.BoolVar(&verifyOnly, "verify-only", false, "Skip copy, only verify existing source vs target")
+	f.BoolVar(&skipVerify, "skip-verify", false, "Skip verification (copy only)")
+	f.BoolVar(&quickVerify, "quick-verify", false, "Quick verification (refs + tree hashes only)")
+	f.StringVar(&since, "since", "", "Incremental verify: only check objects after this SHA or date")
+	f.StringVar(&reportPath, "report", "", "Path to write JSON verification report")
+	f.StringVar(&signKey, "sign", "", "GPG key ID to sign the verification report (Attestation Signature)")
+	f.BoolVar(&verbose, "verbose", false, "Verbose output")
+	f.BoolVar(&dryRun, "dry-run", false, "Show what would be done without making changes")
 	f.BoolVar(&nonInteractive, "non-interactive", false, "Skip confirmation prompts (for CI/CD and automation)")
 	f.BoolVar(&noWorkflows, "no-workflows", false, "Exclude GitHub Actions workflows (.github/workflows/) from the target")
 	f.BoolVar(&noActions, "no-actions", false, "Exclude GitHub Actions custom actions (.github/actions/) from the target")
@@ -158,358 +158,402 @@ Example:
 	bf.StringSliceVar(&excludePaths, "exclude", nil, "Additional paths to exclude from target")
 	rootCmd.AddCommand(batchCmd)
 
-if err := rootCmd.Execute(); err != nil {
-os.Exit(1)
-}
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
 }
 
 func run(cmd *cobra.Command, args []string) error {
-// Load config file if provided
-var cfg *config.Config
-if configPath != "" {
-var err error
-cfg, err = config.Load(configPath)
-if err != nil {
-return fmt.Errorf("config error: %w", err)
-}
-applyConfig(cfg, cmd.Flags())
-}
+	// Load config file if provided
+	var cfg *config.Config
+	if configPath != "" {
+		var err error
+		cfg, err = config.Load(configPath)
+		if err != nil {
+			return fmt.Errorf("config error: %w", err)
+		}
+		applyConfig(cfg, cmd.Flags())
+	}
 
-// Config file may supply args, CLI args override
-var sourceRepo, targetOrg string
-if len(args) >= 2 {
-sourceRepo = args[0]
-targetOrg = args[1]
-} else if cfg != nil {
-sourceRepo = cfg.Source.Repo
-targetOrg = cfg.Target.Org
-} else {
-return fmt.Errorf("requires 2 arguments: <source-repo> <target-org> (or use --config)")
-}
+	// Config file may supply args, CLI args override
+	var sourceRepo, targetOrg string
+	if len(args) >= 2 {
+		sourceRepo = args[0]
+		targetOrg = args[1]
+	} else if cfg != nil {
+		sourceRepo = cfg.Source.Repo
+		targetOrg = cfg.Target.Org
+	} else {
+		return fmt.Errorf("requires 2 arguments: <source-repo> <target-org> (or use --config)")
+	}
 
-if allMetadata {
-copyIssues = true
-copyPRs = true
-copyWiki = true
-}
+	if allMetadata {
+		copyIssues = true
+		copyPRs = true
+		copyWiki = true
+	}
 
-if verifyOnly && skipVerify {
-return fmt.Errorf("cannot use --verify-only and --skip-verify together")
-}
+	if verifyOnly && skipVerify {
+		return fmt.Errorf("cannot use --verify-only and --skip-verify together")
+	}
 
-if err := validateVisibility(targetVisibility); err != nil {
-	return err
-}
+	if err := validateVisibility(targetVisibility); err != nil {
+		return err
+	}
 
-// Resolve target repo name
-repoName := targetName
-if repoName == "" {
-_, name, err := parseRepo(sourceRepo)
-if err != nil {
-return err
-}
-repoName = name
-}
+	// Resolve target repo name
+	repoName := targetName
+	if repoName == "" {
+		_, name, err := parseRepo(sourceRepo)
+		if err != nil {
+			return err
+		}
+		repoName = name
+	}
 
-if dryRun {
-fmt.Println("=== DRY RUN ===")
-fmt.Printf("Source:      %s/%s (public: %v)\n", sourceHost, sourceRepo, publicSource)
-fmt.Printf("Target:      %s/%s/%s (visibility: %s)\n", targetHost, targetOrg, repoName, targetVisibility)
-fmt.Printf("LFS:         %v\n", lfs)
-fmt.Printf("Metadata:    issues=%v, PRs=%v, wiki=%v\n", copyIssues, copyPRs, copyWiki)
+	if dryRun {
+		fmt.Println("=== DRY RUN ===")
+		fmt.Printf("Source:      %s/%s (public: %v)\n", sourceHost, sourceRepo, publicSource)
+		fmt.Printf("Target:      %s/%s/%s (visibility: %s)\n", targetHost, targetOrg, repoName, targetVisibility)
+		fmt.Printf("LFS:         %v\n", lfs)
+		fmt.Printf("Metadata:    issues=%v, PRs=%v, wiki=%v\n", copyIssues, copyPRs, copyWiki)
 		fmt.Printf("Code only:   %v\n", codeOnly)
-fmt.Printf("Exclude:     no-workflows=%v, no-actions=%v, no-copilot=%v, no-github=%v, paths=%v\n", noWorkflows, noActions, noCopilot, noGitHub, excludePaths)
-fmt.Printf("Verify:      skip=%v, quick=%v, only=%v, since=%q\n", skipVerify, quickVerify, verifyOnly, since)
-fmt.Printf("Report:      %s\n", reportPath)
-fmt.Printf("Attestation: %s\n", signKey)
-return nil
-}
+		fmt.Printf("Exclude:     no-workflows=%v, no-actions=%v, no-copilot=%v, no-github=%v, paths=%v\n", noWorkflows, noActions, noCopilot, noGitHub, excludePaths)
+		fmt.Printf("Verify:      skip=%v, quick=%v, only=%v, since=%q\n", skipVerify, quickVerify, verifyOnly, since)
+		fmt.Printf("Report:      %s\n", reportPath)
+		fmt.Printf("Attestation: %s\n", signKey)
+		return nil
+	}
 
-// Authenticate
-var srcToken, tgtToken string
-var err error
-if publicSource {
-fmt.Println("Public source mode: skipping source authentication")
-if sourceToken != "" {
-	srcToken = sourceToken
-	fmt.Println("  Using --source-token for authenticated access (5,000 req/hr)")
-} else if copyIssues || copyPRs {
-fmt.Println("Note: Metadata copy from public repos uses unauthenticated API access (60 req/hr rate limit).")
-fmt.Println("      For repos with many issues/PRs/releases, consider providing a source token for higher limits.")
-}
-tgtToken, err = auth.AuthenticateTarget(authMethod, targetHost, targetToken)
-if err != nil {
-return fmt.Errorf("target authentication failed: %w", err)
-}
-} else {
-srcToken, tgtToken, err = auth.Authenticate(authMethod, sourceHost, targetHost, sourceToken, targetToken)
-if err != nil {
-return fmt.Errorf("authentication failed: %w", err)
-}
-}
+	// Authenticate
+	var srcToken, tgtToken string
+	var err error
+	if publicSource {
+		fmt.Println("Public source mode: skipping source authentication")
+		if sourceToken != "" {
+			srcToken = sourceToken
+			fmt.Println("  Using --source-token for authenticated access (5,000 req/hr)")
+		} else if copyIssues || copyPRs {
+			fmt.Println("Note: Metadata copy from public repos uses unauthenticated API access (60 req/hr rate limit).")
+			fmt.Println("      For repos with many issues/PRs/releases, consider providing a source token for higher limits.")
+		}
+		tgtToken, err = auth.AuthenticateTarget(authMethod, targetHost, targetToken)
+		if err != nil {
+			return fmt.Errorf("target authentication failed: %w", err)
+		}
+	} else {
+		srcToken, tgtToken, err = auth.Authenticate(authMethod, sourceHost, targetHost, sourceToken, targetToken)
+		if err != nil {
+			return fmt.Errorf("authentication failed: %w", err)
+		}
+	}
 
-srcClient, err := ghclient.NewClient(sourceHost, srcToken)
-if err != nil {
-	return fmt.Errorf("failed to create source client: %w", err)
-}
-tgtClient, err := ghclient.NewClient(targetHost, tgtToken)
-if err != nil {
-	return fmt.Errorf("failed to create target client: %w", err)
-}
+	srcClient, err := ghclient.NewClient(sourceHost, srcToken)
+	if err != nil {
+		return fmt.Errorf("failed to create source client: %w", err)
+	}
+	tgtClient, err := ghclient.NewClient(targetHost, tgtToken)
+	if err != nil {
+		return fmt.Errorf("failed to create target client: %w", err)
+	}
 
-srcOwner, srcName, err := parseRepo(sourceRepo)
-if err != nil {
-return err
-}
+	srcOwner, srcName, err := parseRepo(sourceRepo)
+	if err != nil {
+		return err
+	}
 
-var rejectedRefs []string
+	var rejectedRefs []string
 
-if !verifyOnly {
-fmt.Printf("Creating target repository %s/%s on %s (visibility: %s)...\n", targetOrg, repoName, targetHost, targetVisibility)
+	if !verifyOnly {
+		fmt.Printf("Creating target repository %s/%s on %s (visibility: %s)...\n", targetOrg, repoName, targetHost, targetVisibility)
 
-// Check if target repo already exists
-exists, existErr := tgtClient.RepoExists(targetOrg, repoName)
-if existErr != nil {
-if !force {
-return fmt.Errorf("cannot verify if target repo exists: %w\n  Use --force to bypass this check", existErr)
-}
-fmt.Printf("  Warning: could not check if target repo exists: %v\n", existErr)
-fmt.Println("  Proceeding because --force was specified.")
-}
-
-forceOverwrite := false
-if exists {
-if force {
-// --force: destructive mirror push (overwrites everything)
-fmt.Println()
-fmt.Printf("  ⚠️  WARNING: Target repository %s/%s already exists on %s.\n", targetOrg, repoName, targetHost)
-fmt.Println("  --force mode: a mirror push will OVERWRITE all branches, tags, and history.")
-fmt.Println("  Any content in the target that does not exist in the source WILL BE PERMANENTLY LOST.")
-fmt.Println()
-if !nonInteractive && !confirmAction("Do you want to continue and overwrite the existing repository?") {
-fmt.Println("Aborted.")
-return nil
-}
-fmt.Println()
-forceOverwrite = true
-} else {
-// Default: additive push (preserves existing tags and releases)
-fmt.Printf("  Repository %s/%s already exists. Using additive mode (existing tags and releases preserved).\n", targetOrg, repoName)
-}
-} else {
-if err := tgtClient.CreateRepo(targetOrg, repoName, targetVisibility, verbose); err != nil {
-return fmt.Errorf("failed to create target repo: %w", err)
-}
-}
-
-fmt.Printf("Mirroring %s/%s from %s to %s/%s on %s...\n", srcOwner, srcName, sourceHost, targetOrg, repoName, targetHost)
-rejectedRefs, err = vcopy.MirrorRepo(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, lfs, forceOverwrite, codeOnly, verbose)
-if err != nil {
-return fmt.Errorf("mirror failed: %w", err)
-}
-
-// Auto-sync releases and tags (unless --code-only)
-if !codeOnly {
-if exists && !forceOverwrite {
-fmt.Println("Syncing new releases to target (existing releases preserved)...")
-if err := vcopy.SyncReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-if ghclient.IsRateLimitError(err) {
-	fmt.Println("⚠ Release sync aborted: API rate limit exhausted. Releases may be incomplete.")
-	fmt.Println("  Re-run with --source-token or wait for rate limit reset.")
-} else {
-	fmt.Printf("Warning: release sync failed: %v\n", err)
-}
-}
-		} else if exists && forceOverwrite {
-			// --force on existing repo: clean orphaned releases, then copy all from source
-			fmt.Println("Cleaning orphaned releases from target...")
-			if err := vcopy.CleanTargetReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-				fmt.Printf("Warning: release cleanup failed: %v\n", err)
+		// Check if target repo already exists
+		exists, existErr := tgtClient.RepoExists(targetOrg, repoName)
+		if existErr != nil {
+			if !force {
+				return fmt.Errorf("cannot verify if target repo exists: %w\n  Use --force to bypass this check", existErr)
 			}
-			fmt.Println("Copying releases...")
-			if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-				if ghclient.IsRateLimitError(err) {
-					fmt.Println("⚠ Release copy aborted: API rate limit exhausted. Releases may be incomplete.")
-					fmt.Println("  Re-run with --source-token or wait for rate limit reset.")
-				} else {
-					fmt.Printf("Warning: release copy failed: %v\n", err)
+			fmt.Printf("  Warning: could not check if target repo exists: %v\n", existErr)
+			fmt.Println("  Proceeding because --force was specified.")
+		}
+
+		forceOverwrite := false
+		if exists {
+			if force {
+				// --force: destructive mirror push (overwrites everything)
+				fmt.Println()
+				fmt.Printf("  ⚠️  WARNING: Target repository %s/%s already exists on %s.\n", targetOrg, repoName, targetHost)
+				fmt.Println("  --force mode: a mirror push will OVERWRITE all branches, tags, and history.")
+				fmt.Println("  Any content in the target that does not exist in the source WILL BE PERMANENTLY LOST.")
+				fmt.Println()
+				if !nonInteractive && !confirmAction("Do you want to continue and overwrite the existing repository?") {
+					fmt.Println("Aborted.")
+					return nil
 				}
+				fmt.Println()
+				forceOverwrite = true
+			} else {
+				// Default: additive push (preserves existing tags and releases)
+				fmt.Printf("  Repository %s/%s already exists. Using additive mode (existing tags and releases preserved).\n", targetOrg, repoName)
 			}
 		} else {
-			// New repo: copy all releases from source
-			fmt.Println("Copying releases...")
-			if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-				if ghclient.IsRateLimitError(err) {
-					fmt.Println("⚠ Release copy aborted: API rate limit exhausted. Releases may be incomplete.")
-					fmt.Println("  Re-run with --source-token or wait for rate limit reset.")
-				} else {
-					fmt.Printf("Warning: release copy failed: %v\n", err)
+			if err := tgtClient.CreateRepo(targetOrg, repoName, targetVisibility, verbose); err != nil {
+				return fmt.Errorf("failed to create target repo: %w", err)
+			}
+		}
+
+		fmt.Printf("Mirroring %s/%s from %s to %s/%s on %s...\n", srcOwner, srcName, sourceHost, targetOrg, repoName, targetHost)
+		rejectedRefs, err = vcopy.MirrorRepo(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, lfs, forceOverwrite, codeOnly, verbose)
+		if err != nil {
+			return fmt.Errorf("mirror failed: %w", err)
+		}
+
+		// Auto-sync releases and tags (unless --code-only)
+		if !codeOnly {
+			if exists && !forceOverwrite {
+				fmt.Println("Syncing new releases to target (existing releases preserved)...")
+				if err := vcopy.SyncReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+					if ghclient.IsRateLimitError(err) {
+						fmt.Println("⚠ Release sync aborted: API rate limit exhausted. Releases may be incomplete.")
+						fmt.Println("  Re-run with --source-token or wait for rate limit reset.")
+					} else {
+						fmt.Printf("Warning: release sync failed: %v\n", err)
+					}
+				}
+			} else if exists && forceOverwrite {
+				// --force on existing repo: clean orphaned releases, then copy all from source
+				fmt.Println("Cleaning orphaned releases from target...")
+				if err := vcopy.CleanTargetReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+					fmt.Printf("Warning: release cleanup failed: %v\n", err)
+				}
+				fmt.Println("Copying releases...")
+				if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+					if ghclient.IsRateLimitError(err) {
+						fmt.Println("⚠ Release copy aborted: API rate limit exhausted. Releases may be incomplete.")
+						fmt.Println("  Re-run with --source-token or wait for rate limit reset.")
+					} else {
+						fmt.Printf("Warning: release copy failed: %v\n", err)
+					}
+				}
+			} else {
+				// New repo: copy all releases from source
+				fmt.Println("Copying releases...")
+				if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+					if ghclient.IsRateLimitError(err) {
+						fmt.Println("⚠ Release copy aborted: API rate limit exhausted. Releases may be incomplete.")
+						fmt.Println("  Re-run with --source-token or wait for rate limit reset.")
+					} else {
+						fmt.Printf("Warning: release copy failed: %v\n", err)
+					}
 				}
 			}
-}
-} else if verbose {
-fmt.Println("  Skipping tags and releases (--code-only mode)")
-}
+		} else if verbose {
+			fmt.Println("  Skipping tags and releases (--code-only mode)")
+		}
 
-if copyIssues {
-fmt.Println("Copying issues...")
-if err := vcopy.CopyIssues(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-return fmt.Errorf("issue copy failed: %w", err)
-}
-}
-if copyPRs {
-fmt.Println("Copying pull requests...")
-if err := vcopy.CopyPullRequests(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-return fmt.Errorf("PR copy failed: %w", err)
-}
-}
-if copyWiki {
-fmt.Println("Copying wiki...")
-if err := vcopy.CopyWiki(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, verbose); err != nil {
-fmt.Printf("Warning: wiki copy failed (wiki may not exist): %v\n", err)
-}
-}
-}
+		if copyIssues {
+			fmt.Println("Copying issues...")
+			if err := vcopy.CopyIssues(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+				return fmt.Errorf("issue copy failed: %w", err)
+			}
+		}
+		if copyPRs {
+			fmt.Println("Copying pull requests...")
+			if err := vcopy.CopyPullRequests(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+				return fmt.Errorf("PR copy failed: %w", err)
+			}
+		}
+		if copyWiki {
+			fmt.Println("Copying wiki...")
+			if err := vcopy.CopyWiki(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, verbose); err != nil {
+				fmt.Printf("Warning: wiki copy failed (wiki may not exist): %v\n", err)
+			}
+		}
+	}
 
-if !skipVerify {
-fmt.Println("\n=== Running Integrity Verification ===")
+	if !skipVerify {
+		fmt.Println("\n=== Running Integrity Verification ===")
 
-var results *verify.VerificationReport
-opts := verify.Options{
-QuickMode:    quickVerify,
-CodeOnly:     codeOnly,
-Verbose:      verbose,
-ExcludedRefs: rejectedRefs,
-}
-if since != "" {
-results, err = verify.RunIncremental(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, since, opts)
-} else {
-results, err = verify.RunAll(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, opts)
-}
-if err != nil {
-return fmt.Errorf("verification failed: %w", err)
-}
+		var results *verify.VerificationReport
+		opts := verify.Options{
+			QuickMode:    quickVerify,
+			CodeOnly:     codeOnly,
+			Verbose:      verbose,
+			ExcludedRefs: rejectedRefs,
+		}
+		if since != "" {
+			results, err = verify.RunIncremental(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, since, opts)
+		} else {
+			results, err = verify.RunAll(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, opts)
+		}
+		if err != nil {
+			return fmt.Errorf("verification failed: %w", err)
+		}
 
-if signKey != "" {
-fmt.Printf("Signing verification report with key %s...\n", signKey)
-if err := report.SignReport(results, signKey); err != nil {
-return fmt.Errorf("attestation signature failed: %w", err)
-}
-fmt.Println("Attestation Signature applied")
-}
+		if signKey != "" {
+			fmt.Printf("Signing verification report with key %s...\n", signKey)
+			if err := report.SignReport(results, signKey); err != nil {
+				return fmt.Errorf("attestation signature failed: %w", err)
+			}
+			fmt.Println("Attestation Signature applied")
+		}
 
-report.PrintTerminal(results)
+		report.PrintTerminal(results)
 
-if reportPath != "" {
-if err := report.WriteJSON(results, reportPath); err != nil {
-return fmt.Errorf("failed to write report: %w", err)
-}
-fmt.Printf("\nJSON report written to: %s\n", reportPath)
-}
+		if reportPath != "" {
+			if err := report.WriteJSON(results, reportPath); err != nil {
+				return fmt.Errorf("failed to write report: %w", err)
+			}
+			fmt.Printf("\nJSON report written to: %s\n", reportPath)
+		}
 
-if !results.AllPassed() {
-return fmt.Errorf("VERIFICATION FAILED: one or more checks did not pass")
-}
+		if !results.AllPassed() {
+			return fmt.Errorf("VERIFICATION FAILED: one or more checks did not pass")
+		}
 
-fmt.Println("\nAll verification checks passed. Repository copy is verified.")
-} else {
-fmt.Println("\nCopy complete (verification skipped).")
-}
+		fmt.Println("\nAll verification checks passed. Repository copy is verified.")
+	} else {
+		fmt.Println("\nCopy complete (verification skipped).")
+	}
 
-// Exclude paths from target (post-verification cleanup commit)
-excludeList, err := vcopy.BuildExcludePaths(noWorkflows, noActions, noCopilot, noGitHub, excludePaths)
-if err != nil {
-return fmt.Errorf("invalid exclude paths: %w", err)
-}
-if len(excludeList) > 0 && !verifyOnly {
-if err := vcopy.CleanupExcludedPaths(targetHost, targetOrg, repoName, tgtToken, excludeList, verbose); err != nil {
-return fmt.Errorf("exclude cleanup failed: %w", err)
-}
-}
+	// Exclude paths from target (post-verification cleanup commit)
+	excludeList, err := vcopy.BuildExcludePaths(noWorkflows, noActions, noCopilot, noGitHub, excludePaths)
+	if err != nil {
+		return fmt.Errorf("invalid exclude paths: %w", err)
+	}
+	if len(excludeList) > 0 && !verifyOnly {
+		if err := vcopy.CleanupExcludedPaths(targetHost, targetOrg, repoName, tgtToken, excludeList, verbose); err != nil {
+			return fmt.Errorf("exclude cleanup failed: %w", err)
+		}
+	}
 
-return nil
+	return nil
 }
 
 func applyConfig(cfg *config.Config, flags *pflag.FlagSet) {
-if sourceHost == "github.com" && cfg.Source.Host != "" {
-sourceHost = cfg.Source.Host
-}
-if targetHost == "github.com" && cfg.Target.Host != "" {
-targetHost = cfg.Target.Host
-}
-if targetName == "" && cfg.Target.Name != "" {
-targetName = cfg.Target.Name
-}
-if authMethod == "auto" && cfg.Auth.Method != "" {
-authMethod = cfg.Auth.Method
-}
-if sourceToken == "" && cfg.Auth.SourceToken != "" {
-sourceToken = cfg.Auth.SourceToken
-}
-if targetToken == "" && cfg.Auth.TargetToken != "" {
-targetToken = cfg.Auth.TargetToken
-}
-if !publicSource { publicSource = cfg.Source.Public }
-if (flags == nil || !flags.Changed("visibility")) && cfg.Target.Visibility != "" { targetVisibility = cfg.Target.Visibility }
-if !lfs { lfs = cfg.LFS }
-if !force { force = cfg.Force }
-if !codeOnly { codeOnly = cfg.CodeOnly }
-if !copyIssues { copyIssues = cfg.Copy.Issues }
-if !copyPRs { copyPRs = cfg.Copy.PullRequests }
-if !copyWiki { copyWiki = cfg.Copy.Wiki }
-if !allMetadata { allMetadata = cfg.Copy.AllMetadata }
-if !skipVerify { skipVerify = cfg.Verify.Skip }
-if !quickVerify { quickVerify = cfg.Verify.QuickMode }
-if !verifyOnly { verifyOnly = cfg.Verify.VerifyOnly }
-if since == "" { since = cfg.Verify.Since }
-if reportPath == "" && cfg.Report.Path != "" { reportPath = cfg.Report.Path }
-if signKey == "" && cfg.Report.SignKey != "" { signKey = cfg.Report.SignKey }
-if !verbose { verbose = cfg.Verbose }
-	if !nonInteractive { nonInteractive = cfg.NonInteractive }
-	if !noWorkflows { noWorkflows = cfg.Exclude.Workflows }
-	if !noActions { noActions = cfg.Exclude.Actions }
-	if !noCopilot { noCopilot = cfg.Exclude.Copilot }
-	if !noGitHub { noGitHub = cfg.Exclude.GitHub }
-	if len(excludePaths) == 0 && len(cfg.Exclude.Paths) > 0 { excludePaths = cfg.Exclude.Paths }
+	if sourceHost == "github.com" && cfg.Source.Host != "" {
+		sourceHost = cfg.Source.Host
+	}
+	if targetHost == "github.com" && cfg.Target.Host != "" {
+		targetHost = cfg.Target.Host
+	}
+	if targetName == "" && cfg.Target.Name != "" {
+		targetName = cfg.Target.Name
+	}
+	if authMethod == "auto" && cfg.Auth.Method != "" {
+		authMethod = cfg.Auth.Method
+	}
+	if sourceToken == "" && cfg.Auth.SourceToken != "" {
+		sourceToken = cfg.Auth.SourceToken
+	}
+	if targetToken == "" && cfg.Auth.TargetToken != "" {
+		targetToken = cfg.Auth.TargetToken
+	}
+	if !publicSource {
+		publicSource = cfg.Source.Public
+	}
+	if (flags == nil || !flags.Changed("visibility")) && cfg.Target.Visibility != "" {
+		targetVisibility = cfg.Target.Visibility
+	}
+	if !lfs {
+		lfs = cfg.LFS
+	}
+	if !force {
+		force = cfg.Force
+	}
+	if !codeOnly {
+		codeOnly = cfg.CodeOnly
+	}
+	if !copyIssues {
+		copyIssues = cfg.Copy.Issues
+	}
+	if !copyPRs {
+		copyPRs = cfg.Copy.PullRequests
+	}
+	if !copyWiki {
+		copyWiki = cfg.Copy.Wiki
+	}
+	if !allMetadata {
+		allMetadata = cfg.Copy.AllMetadata
+	}
+	if !skipVerify {
+		skipVerify = cfg.Verify.Skip
+	}
+	if !quickVerify {
+		quickVerify = cfg.Verify.QuickMode
+	}
+	if !verifyOnly {
+		verifyOnly = cfg.Verify.VerifyOnly
+	}
+	if since == "" {
+		since = cfg.Verify.Since
+	}
+	if reportPath == "" && cfg.Report.Path != "" {
+		reportPath = cfg.Report.Path
+	}
+	if signKey == "" && cfg.Report.SignKey != "" {
+		signKey = cfg.Report.SignKey
+	}
+	if !verbose {
+		verbose = cfg.Verbose
+	}
+	if !nonInteractive {
+		nonInteractive = cfg.NonInteractive
+	}
+	if !noWorkflows {
+		noWorkflows = cfg.Exclude.Workflows
+	}
+	if !noActions {
+		noActions = cfg.Exclude.Actions
+	}
+	if !noCopilot {
+		noCopilot = cfg.Exclude.Copilot
+	}
+	if !noGitHub {
+		noGitHub = cfg.Exclude.GitHub
+	}
+	if len(excludePaths) == 0 && len(cfg.Exclude.Paths) > 0 {
+		excludePaths = cfg.Exclude.Paths
+	}
 }
 
 func parseRepo(repo string) (owner, name string, err error) {
-parts := splitRepo(repo)
-if len(parts) != 2 {
-return "", "", fmt.Errorf("invalid repo format %q: expected owner/repo", repo)
-}
-return parts[0], parts[1], nil
+	parts := splitRepo(repo)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid repo format %q: expected owner/repo", repo)
+	}
+	return parts[0], parts[1], nil
 }
 
 func splitRepo(repo string) []string {
-var parts []string
-current := ""
-for _, c := range repo {
-if c == '/' {
-if current != "" {
-parts = append(parts, current)
-current = ""
-}
-} else {
-current += string(c)
-}
-}
-if current != "" {
-parts = append(parts, current)
-}
-return parts
+	var parts []string
+	current := ""
+	for _, c := range repo {
+		if c == '/' {
+			if current != "" {
+				parts = append(parts, current)
+				current = ""
+			}
+		} else {
+			current += string(c)
+		}
+	}
+	if current != "" {
+		parts = append(parts, current)
+	}
+	return parts
 }
 
 // confirmAction prompts the user with a yes/no question and returns true only if they type "yes" or "y".
 func confirmAction(prompt string) bool {
-reader := bufio.NewReader(os.Stdin)
-fmt.Printf("  %s [yes/no]: ", prompt)
-answer, err := reader.ReadString('\n')
-if err != nil {
-return false
-}
-answer = strings.TrimSpace(strings.ToLower(answer))
-return answer == "yes" || answer == "y"
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Printf("  %s [yes/no]: ", prompt)
+	answer, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	return answer == "yes" || answer == "y"
 }
 
 // batchRun implements the `vcopy batch` subcommand.

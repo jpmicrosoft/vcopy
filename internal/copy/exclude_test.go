@@ -11,12 +11,12 @@ func TestBuildExcludePaths_Presets(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	expected := map[string]bool{
-		".github/workflows":              true,
+		".github/workflows":               true,
 		".github/copilot-instructions.md": true,
-		".github/copilot":                true,
-		"CODEOWNERS":                     true,
-		".github/CODEOWNERS":             true,
-		"docs/CODEOWNERS":                true,
+		".github/copilot":                 true,
+		"CODEOWNERS":                      true,
+		".github/CODEOWNERS":              true,
+		"docs/CODEOWNERS":                 true,
 	}
 	if len(paths) != len(expected) {
 		t.Fatalf("expected %d paths, got %d: %v", len(expected), len(paths), paths)
