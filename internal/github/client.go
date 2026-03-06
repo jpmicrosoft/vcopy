@@ -264,6 +264,52 @@ func (c *Client) DeleteRelease(owner, repo string, releaseID int64) error {
 	return err
 }
 
+// validateDownloadURL validates a redirect URL to prevent SSRF attacks.
+// It checks that the URL uses HTTPS and does not point to localhost or private networks.
+func validateDownloadURL(redirectURL string, assetID int64) error {
+	parsedURL, err := url.Parse(redirectURL)
+	if err != nil || parsedURL.Scheme != "https" {
+		return fmt.Errorf("invalid or non-HTTPS redirect URL for asset %d", assetID)
+	}
+	host := parsedURL.Hostname()
+	if host == "localhost" {
+		return fmt.Errorf("redirect to localhost blocked for asset %d", assetID)
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+			return fmt.Errorf("redirect to private/internal network blocked for asset %d", assetID)
+		}
+	}
+	return nil
+}
+
+// buildSafeHTTPClient constructs an HTTP client with a custom dialer that validates
+// resolved IPs to prevent DNS rebinding and SSRF attacks.
+func buildSafeHTTPClient() *http.Client {
+	safeDialer := &net.Dialer{Timeout: 30 * time.Second}
+	return &http.Client{
+		Timeout: 10 * time.Minute,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				dialHost, port, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, err
+				}
+				ips, err := net.LookupIP(dialHost)
+				if err != nil {
+					return nil, err
+				}
+				for _, ip := range ips {
+					if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+						return nil, fmt.Errorf("DNS resolved to private/internal IP %s — blocked for SSRF protection", ip)
+					}
+				}
+				return safeDialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+			},
+		},
+	}
+}
+
 // DownloadReleaseAsset downloads a release asset and returns the HTTP response body.
 // Caller is responsible for closing the response body.
 func (c *Client) DownloadReleaseAsset(owner, repo string, assetID int64) (*http.Response, error) {
@@ -281,44 +327,10 @@ func (c *Client) DownloadReleaseAsset(owner, repo string, assetID int64) (*http.
 		rc.Close()
 	}
 	if redirectURL != "" {
-		// Validate redirect URL to prevent SSRF
-		parsedURL, err := url.Parse(redirectURL)
-		if err != nil || parsedURL.Scheme != "https" {
-			return nil, fmt.Errorf("invalid or non-HTTPS redirect URL for asset %d", assetID)
+		if err := validateDownloadURL(redirectURL, assetID); err != nil {
+			return nil, err
 		}
-		// Block private/internal hostnames
-		host := parsedURL.Hostname()
-		if host == "localhost" {
-			return nil, fmt.Errorf("redirect to localhost blocked for asset %d", assetID)
-		}
-		if ip := net.ParseIP(host); ip != nil {
-			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
-				return nil, fmt.Errorf("redirect to private/internal network blocked for asset %d", assetID)
-			}
-		}
-		// Use a custom dialer that validates resolved IPs to prevent DNS rebinding
-		safeDialer := &net.Dialer{Timeout: 30 * time.Second}
-		client := &http.Client{
-			Timeout: 10 * time.Minute,
-			Transport: &http.Transport{
-				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-					dialHost, port, err := net.SplitHostPort(addr)
-					if err != nil {
-						return nil, err
-					}
-					ips, err := net.LookupIP(dialHost)
-					if err != nil {
-						return nil, err
-					}
-					for _, ip := range ips {
-						if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
-							return nil, fmt.Errorf("DNS resolved to private/internal IP %s — blocked for SSRF protection", ip)
-						}
-					}
-					return safeDialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
-				},
-			},
-		}
+		client := buildSafeHTTPClient()
 		resp, err := client.Get(redirectURL)
 		if err != nil {
 			return nil, fmt.Errorf("download request failed for asset %d: %w", assetID, err)
@@ -457,6 +469,33 @@ func parseRetryAfter(header string) time.Duration {
 	return time.Duration(secs)*time.Second + 2*time.Second
 }
 
+// detectRateLimitWait determines if a response indicates a GitHub rate limit
+// and returns the wait duration. Returns (0, false) if the response is not rate-limited.
+// Check order: Retry-After first (secondary 403), then 429, then primary 403.
+func detectRateLimitWait(resp *http.Response) (time.Duration, bool) {
+	switch {
+	case resp.StatusCode == http.StatusForbidden && resp.Header.Get("Retry-After") != "":
+		// Secondary/abuse rate limit: 403 + Retry-After header
+		return parseRetryAfter(resp.Header.Get("Retry-After")), true
+	case resp.StatusCode == http.StatusTooManyRequests:
+		// Secondary/abuse rate limit: 429 + Retry-After header
+		return parseRetryAfter(resp.Header.Get("Retry-After")), true
+	case resp.StatusCode == http.StatusForbidden && resp.Header.Get("X-RateLimit-Remaining") == "0":
+		// Primary rate limit: 403 + X-RateLimit-Remaining: 0
+		resetStr := resp.Header.Get("X-RateLimit-Reset")
+		if resetStr == "" {
+			return 0, false
+		}
+		var resetEpoch int64
+		if _, scanErr := fmt.Sscanf(resetStr, "%d", &resetEpoch); scanErr != nil {
+			return 0, false
+		}
+		return time.Until(time.Unix(resetEpoch, 0)) + 5*time.Second, true
+	default:
+		return 0, false
+	}
+}
+
 func (t *rateLimitTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	for attempt := 0; attempt <= maxRateLimitRetries; attempt++ {
 		resp, err := t.base.RoundTrip(req)
@@ -467,26 +506,8 @@ func (t *rateLimitTransport) RoundTrip(req *http.Request) (*http.Response, error
 		// Determine wait duration based on rate limit type.
 		// Retry-After is checked first: secondary 403s may also carry
 		// X-RateLimit-Remaining: 0, but Retry-After is the definitive signal.
-		var wait time.Duration
-		switch {
-		case resp.StatusCode == http.StatusForbidden && resp.Header.Get("Retry-After") != "":
-			// Secondary/abuse rate limit: 403 + Retry-After header
-			wait = parseRetryAfter(resp.Header.Get("Retry-After"))
-		case resp.StatusCode == http.StatusTooManyRequests:
-			// Secondary/abuse rate limit: 429 + Retry-After header
-			wait = parseRetryAfter(resp.Header.Get("Retry-After"))
-		case resp.StatusCode == http.StatusForbidden && resp.Header.Get("X-RateLimit-Remaining") == "0":
-			// Primary rate limit: 403 + X-RateLimit-Remaining: 0
-			resetStr := resp.Header.Get("X-RateLimit-Reset")
-			if resetStr == "" {
-				return resp, nil
-			}
-			var resetEpoch int64
-			if _, scanErr := fmt.Sscanf(resetStr, "%d", &resetEpoch); scanErr != nil {
-				return resp, nil
-			}
-			wait = time.Until(time.Unix(resetEpoch, 0)) + 5*time.Second
-		default:
+		wait, isRateLimited := detectRateLimitWait(resp)
+		if !isRateLimited {
 			return resp, nil
 		}
 

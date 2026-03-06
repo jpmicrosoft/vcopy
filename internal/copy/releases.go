@@ -60,20 +60,9 @@ func syncReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRep
 		return fmt.Errorf("failed to list source releases: %w", err)
 	}
 
-	// When incremental, build a set of existing target releases to skip
 	existingTags := make(map[string]bool)
 	if incrementalOnly {
-		tgtReleases, err := tgt.ListReleases(tgtOwner, tgtRepo)
-		if err != nil {
-			fmt.Printf("  Warning: could not list target releases (falling back to full copy): %v\n", err)
-		} else {
-			for _, r := range tgtReleases {
-				existingTags[r.GetTagName()] = true
-			}
-			if verbose {
-				fmt.Printf("  Found %d existing releases in target, will skip those\n", len(existingTags))
-			}
-		}
+		existingTags = buildExistingTagsSet(tgt, tgtOwner, tgtRepo, verbose)
 	}
 
 	var copied int
@@ -85,79 +74,13 @@ func syncReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRep
 			continue
 		}
 
-		if verbose {
-			fmt.Printf("  Copying release: %s\n", rel.GetTagName())
-		}
-
-		newRelease := &gh.RepositoryRelease{
-			TagName:         rel.TagName,
-			TargetCommitish: rel.TargetCommitish,
-			Name:            rel.Name,
-			Body:            rel.Body,
-			Draft:           rel.Draft,
-			Prerelease:      rel.Prerelease,
-		}
-
-		created, err := tgt.CreateRelease(tgtOwner, tgtRepo, newRelease)
+		ok, err := copyOneRelease(src, tgt, srcOwner, srcRepo, tgtOwner, tgtRepo, rel, verbose)
 		if err != nil {
-			if ghclient.IsRateLimitError(err) {
-				return fmt.Errorf("rate limited during release copy: %w", err)
-			}
-			if verbose {
-				fmt.Printf("  Warning: failed to create release %s: %v\n", rel.GetTagName(), err)
-			}
-			continue
+			return err
 		}
-
-		// Copy release assets
-		assets, err := src.ListReleaseAssets(srcOwner, srcRepo, rel.GetID())
-		if err != nil {
-			if ghclient.IsRateLimitError(err) {
-				return fmt.Errorf("rate limited during asset listing: %w", err)
-			}
-			if verbose {
-				fmt.Printf("  Warning: failed to list assets for release %s: %v\n", rel.GetTagName(), err)
-			}
-			continue
+		if ok {
+			copied++
 		}
-
-		for _, asset := range assets {
-			if verbose {
-				fmt.Printf("    Uploading asset: %s\n", asset.GetName())
-			}
-
-			resp, err := src.DownloadReleaseAsset(srcOwner, srcRepo, asset.GetID())
-			if err != nil {
-				if ghclient.IsRateLimitError(err) {
-					return fmt.Errorf("rate limited during asset download: %w", err)
-				}
-				if verbose {
-					fmt.Printf("    Warning: failed to download asset %s: %v\n", asset.GetName(), err)
-				}
-				continue
-			}
-
-			uploadFile, uploadErr := ghclient.NewUploadFile(resp.Body, asset.GetName(), int64(asset.GetSize()))
-			resp.Body.Close()
-			if uploadErr != nil {
-				if verbose {
-					fmt.Printf("    Warning: failed to prepare asset %s for upload: %v\n", asset.GetName(), uploadErr)
-				}
-				continue
-			}
-			if err := tgt.UploadReleaseAsset(tgtOwner, tgtRepo, created.GetID(), asset.GetName(), uploadFile); err != nil {
-				uploadFile.Cleanup()
-				if ghclient.IsRateLimitError(err) {
-					return fmt.Errorf("rate limited during asset upload: %w", err)
-				}
-				if verbose {
-					fmt.Printf("    Warning: failed to upload asset %s: %v\n", asset.GetName(), err)
-				}
-				continue
-			}
-			uploadFile.Cleanup()
-		}
-		copied++
 	}
 
 	if incrementalOnly {
@@ -165,5 +88,110 @@ func syncReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRep
 	} else {
 		fmt.Printf("  Copied %d releases\n", copied)
 	}
+	return nil
+}
+
+// buildExistingTagsSet lists target releases and returns a set of their tag names.
+func buildExistingTagsSet(tgt *ghclient.Client, tgtOwner, tgtRepo string, verbose bool) map[string]bool {
+	existingTags := make(map[string]bool)
+	tgtReleases, err := tgt.ListReleases(tgtOwner, tgtRepo)
+	if err != nil {
+		fmt.Printf("  Warning: could not list target releases (falling back to full copy): %v\n", err)
+		return existingTags
+	}
+	for _, r := range tgtReleases {
+		existingTags[r.GetTagName()] = true
+	}
+	if verbose {
+		fmt.Printf("  Found %d existing releases in target, will skip those\n", len(existingTags))
+	}
+	return existingTags
+}
+
+// copyOneRelease creates a single release in the target and copies all its assets.
+// It returns (true, nil) when the release was copied, (false, nil) on a non-fatal
+// error, or (false, err) on a fatal rate-limit error.
+func copyOneRelease(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRepo string, rel *gh.RepositoryRelease, verbose bool) (bool, error) {
+	if verbose {
+		fmt.Printf("  Copying release: %s\n", rel.GetTagName())
+	}
+
+	newRelease := &gh.RepositoryRelease{
+		TagName:         rel.TagName,
+		TargetCommitish: rel.TargetCommitish,
+		Name:            rel.Name,
+		Body:            rel.Body,
+		Draft:           rel.Draft,
+		Prerelease:      rel.Prerelease,
+	}
+
+	created, err := tgt.CreateRelease(tgtOwner, tgtRepo, newRelease)
+	if err != nil {
+		if ghclient.IsRateLimitError(err) {
+			return false, fmt.Errorf("rate limited during release copy: %w", err)
+		}
+		if verbose {
+			fmt.Printf("  Warning: failed to create release %s: %v\n", rel.GetTagName(), err)
+		}
+		return false, nil
+	}
+
+	if err := copyReleaseAssets(src, tgt, srcOwner, srcRepo, tgtOwner, tgtRepo, rel, created, verbose); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+// copyReleaseAssets lists and copies all assets from a source release to a target release.
+func copyReleaseAssets(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRepo string, rel, created *gh.RepositoryRelease, verbose bool) error {
+	assets, err := src.ListReleaseAssets(srcOwner, srcRepo, rel.GetID())
+	if err != nil {
+		if ghclient.IsRateLimitError(err) {
+			return fmt.Errorf("rate limited during asset listing: %w", err)
+		}
+		if verbose {
+			fmt.Printf("  Warning: failed to list assets for release %s: %v\n", rel.GetTagName(), err)
+		}
+		return nil
+	}
+
+	for _, asset := range assets {
+		if verbose {
+			fmt.Printf("    Uploading asset: %s\n", asset.GetName())
+		}
+
+		resp, err := src.DownloadReleaseAsset(srcOwner, srcRepo, asset.GetID())
+		if err != nil {
+			if ghclient.IsRateLimitError(err) {
+				return fmt.Errorf("rate limited during asset download: %w", err)
+			}
+			if verbose {
+				fmt.Printf("    Warning: failed to download asset %s: %v\n", asset.GetName(), err)
+			}
+			continue
+		}
+
+		uploadFile, uploadErr := ghclient.NewUploadFile(resp.Body, asset.GetName(), int64(asset.GetSize()))
+		resp.Body.Close()
+		if uploadErr != nil {
+			if verbose {
+				fmt.Printf("    Warning: failed to prepare asset %s for upload: %v\n", asset.GetName(), uploadErr)
+			}
+			continue
+		}
+		if err := tgt.UploadReleaseAsset(tgtOwner, tgtRepo, created.GetID(), asset.GetName(), uploadFile); err != nil {
+			uploadFile.Cleanup()
+			if ghclient.IsRateLimitError(err) {
+				return fmt.Errorf("rate limited during asset upload: %w", err)
+			}
+			if verbose {
+				fmt.Printf("    Warning: failed to upload asset %s: %v\n", asset.GetName(), err)
+			}
+			continue
+		}
+		uploadFile.Cleanup()
+	}
+
 	return nil
 }

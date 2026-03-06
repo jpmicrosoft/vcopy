@@ -38,29 +38,7 @@ func VerifyBundle(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken
 	// Compare bundle refs (deterministic) rather than raw checksums (non-deterministic)
 	// Missing or mismatched source refs in target = integrity problem (FAIL).
 	// Extra target refs = expected in additive mode (prior runs) → tracked separately.
-	var srcMissing, srcMismatch int
-	var extraTgt int
-	for ref, srcSHA := range srcRefs {
-		if tgtSHA, ok := tgtRefs[ref]; !ok {
-			srcMissing++
-			if opts.Verbose {
-				fmt.Printf("  MISSING in target bundle: %s\n", ref)
-			}
-		} else if srcSHA != tgtSHA {
-			srcMismatch++
-			if opts.Verbose {
-				fmt.Printf("  MISMATCH: %s source=%s target=%s\n", ref, srcSHA, tgtSHA)
-			}
-		}
-	}
-	for ref := range tgtRefs {
-		if _, ok := srcRefs[ref]; !ok {
-			extraTgt++
-			if opts.Verbose {
-				fmt.Printf("  EXTRA in target bundle: %s\n", ref)
-			}
-		}
-	}
+	srcMissing, srcMismatch, extraTgt := compareBundleRefs(srcRefs, tgtRefs, opts)
 
 	excludedCount := len(opts.ExcludedRefs)
 	integrityIssues := srcMissing + srcMismatch
@@ -83,6 +61,33 @@ func VerifyBundle(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken
 	}
 
 	return result, nil
+}
+
+// compareBundleRefs counts source refs missing from target, SHA mismatches, and
+// extra target refs not in source, printing verbose details when enabled.
+func compareBundleRefs(srcRefs, tgtRefs map[string]string, opts Options) (srcMissing, srcMismatch, extraTgt int) {
+	for ref, srcSHA := range srcRefs {
+		if tgtSHA, ok := tgtRefs[ref]; !ok {
+			srcMissing++
+			if opts.Verbose {
+				fmt.Printf("  MISSING in target bundle: %s\n", ref)
+			}
+		} else if srcSHA != tgtSHA {
+			srcMismatch++
+			if opts.Verbose {
+				fmt.Printf("  MISMATCH: %s source=%s target=%s\n", ref, srcSHA, tgtSHA)
+			}
+		}
+	}
+	for ref := range tgtRefs {
+		if _, ok := srcRefs[ref]; !ok {
+			extraTgt++
+			if opts.Verbose {
+				fmt.Printf("  EXTRA in target bundle: %s\n", ref)
+			}
+		}
+	}
+	return srcMissing, srcMismatch, extraTgt
 }
 
 // createAndVerifyBundle clones a repo, creates a git bundle, verifies it, and returns

@@ -70,39 +70,21 @@ func VerifyObjects(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToke
 		tgtSet[obj] = true
 	}
 
-	var missingSrc []string // in source but not target
-	var extraTgt []string   // in target but not source
-
-	for obj := range srcSet {
-		if !tgtSet[obj] {
-			missingSrc = append(missingSrc, obj)
-		}
-	}
-	for obj := range tgtSet {
-		if !srcSet[obj] {
-			extraTgt = append(extraTgt, obj)
-		}
-	}
+	missing, extra := compareObjectSets(srcSet, tgtSet, opts)
 
 	// Missing source objects in target = integrity problem (FAIL).
 	// Extra target objects = expected in additive mode (prior runs, cleanup commits) → WARN.
-	if len(missingSrc) > 0 {
+	if missing > 0 {
 		result.Status = StatusFail
 		var details strings.Builder
-		details.WriteString(fmt.Sprintf("%d objects in source missing from target", len(missingSrc)))
-		if opts.Verbose {
-			sort.Strings(missingSrc)
-			for _, obj := range missingSrc[:min(10, len(missingSrc))] {
-				fmt.Printf("  MISSING: %s\n", obj)
-			}
-		}
-		if len(extraTgt) > 0 {
-			details.WriteString(fmt.Sprintf("; %d extra objects in target (expected — prior runs or cleanup commits)", len(extraTgt)))
+		details.WriteString(fmt.Sprintf("%d objects in source missing from target", missing))
+		if extra > 0 {
+			details.WriteString(fmt.Sprintf("; %d extra objects in target (expected — prior runs or cleanup commits)", extra))
 		}
 		result.Details = details.String()
-	} else if len(extraTgt) > 0 {
+	} else if extra > 0 {
 		result.Status = StatusWarn
-		result.Details = fmt.Sprintf("All %d source objects present in target; %d extra objects in target (expected — prior runs or cleanup commits)", len(srcObjects), len(extraTgt))
+		result.Details = fmt.Sprintf("All %d source objects present in target; %d extra objects in target (expected — prior runs or cleanup commits)", len(srcObjects), extra)
 	} else if len(opts.ExcludedRefs) > 0 {
 		result.Status = StatusWarn
 		result.Details = fmt.Sprintf("All %d objects match (%d refs excluded — rejected by remote)", len(srcObjects), len(opts.ExcludedRefs))
@@ -111,6 +93,30 @@ func VerifyObjects(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToke
 	}
 
 	return result, nil
+}
+
+// compareObjectSets counts source objects missing from target and extra target
+// objects not in source, printing verbose details when enabled.
+func compareObjectSets(srcObjects, tgtObjects map[string]bool, opts Options) (missing, extra int) {
+	var missingSrc []string
+	for obj := range srcObjects {
+		if !tgtObjects[obj] {
+			missingSrc = append(missingSrc, obj)
+		}
+	}
+	for obj := range tgtObjects {
+		if !srcObjects[obj] {
+			extra++
+		}
+	}
+	missing = len(missingSrc)
+	if missing > 0 && opts.Verbose {
+		sort.Strings(missingSrc)
+		for _, obj := range missingSrc[:min(10, len(missingSrc))] {
+			fmt.Printf("  MISSING: %s\n", obj)
+		}
+	}
+	return missing, extra
 }
 
 // listAllObjects uses git rev-list --objects --all to enumerate all objects.
@@ -210,27 +216,41 @@ func VerifyObjectsSince(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, sr
 	return result, nil
 }
 
+// isHexSHA checks whether s consists entirely of hexadecimal characters and
+// is at least 4 characters long (short or full git SHA).
+func isHexSHA(s string) bool {
+	if len(s) < 4 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+// isDateLikePattern checks whether s consists only of characters valid in date
+// patterns (digits, dashes, colons, T, Z, +, spaces, dots).
+func isDateLikePattern(s string) bool {
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || c == '-' || c == ':' || c == 'T' || c == 'Z' || c == '+' || c == ' ' || c == '.') {
+			return false
+		}
+	}
+	return true
+}
+
 // validateSince ensures the --since value is a valid SHA or date, not a flag injection.
 func validateSince(since string) error {
 	if strings.HasPrefix(since, "-") {
 		return fmt.Errorf("invalid --since value %q: must not start with '-'", since)
 	}
-	// Allow hex SHA (short or full)
-	isHex := true
-	for _, c := range since {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-			isHex = false
-			break
-		}
-	}
-	if isHex && len(since) >= 4 {
+	if isHexSHA(since) {
 		return nil
 	}
-	// Allow date-like patterns (digits, dashes, colons, T, Z, +, spaces)
-	for _, c := range since {
-		if !((c >= '0' && c <= '9') || c == '-' || c == ':' || c == 'T' || c == 'Z' || c == '+' || c == ' ' || c == '.') {
-			return fmt.Errorf("invalid --since value %q: must be a git SHA or date", since)
-		}
+	if !isDateLikePattern(since) {
+		return fmt.Errorf("invalid --since value %q: must be a git SHA or date", since)
 	}
 	return nil
 }

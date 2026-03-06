@@ -164,19 +164,56 @@ Example:
 }
 
 func run(cmd *cobra.Command, args []string) error {
-	// Load config file if provided
+	sourceRepo, targetOrg, repoName, err := resolveRunArgs(cmd, args)
+	if err != nil {
+		return err
+	}
+
+	if dryRun {
+		printRunDryRun(sourceRepo, targetOrg, repoName)
+		return nil
+	}
+
+	srcToken, tgtToken, err := authenticate()
+	if err != nil {
+		return err
+	}
+
+	srcClient, tgtClient, srcOwner, srcName, err := buildRunClients(srcToken, tgtToken, sourceRepo)
+	if err != nil {
+		return err
+	}
+
+	var rejectedRefs []string
+	if !verifyOnly {
+		rejectedRefs, err = performRepoCopy(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, srcToken, tgtToken)
+		if err != nil {
+			return err
+		}
+	}
+
+	if !skipVerify {
+		if err := runAndReportVerification(srcOwner, srcName, targetOrg, repoName, srcToken, tgtToken, rejectedRefs); err != nil {
+			return err
+		}
+	} else {
+		fmt.Println("\nCopy complete (verification skipped).")
+	}
+
+	return handleExcludePaths(targetOrg, repoName, tgtToken)
+}
+
+// resolveRunArgs loads config and resolves source repo, target org, and repo name.
+func resolveRunArgs(cmd *cobra.Command, args []string) (sourceRepo, targetOrg, repoName string, err error) {
 	var cfg *config.Config
 	if configPath != "" {
-		var err error
 		cfg, err = config.Load(configPath)
 		if err != nil {
-			return fmt.Errorf("config error: %w", err)
+			return "", "", "", fmt.Errorf("config error: %w", err)
 		}
 		applyConfig(cfg, cmd.Flags())
 	}
 
-	// Config file may supply args, CLI args override
-	var sourceRepo, targetOrg string
 	if len(args) >= 2 {
 		sourceRepo = args[0]
 		targetOrg = args[1]
@@ -184,7 +221,7 @@ func run(cmd *cobra.Command, args []string) error {
 		sourceRepo = cfg.Source.Repo
 		targetOrg = cfg.Target.Org
 	} else {
-		return fmt.Errorf("requires 2 arguments: <source-repo> <target-org> (or use --config)")
+		return "", "", "", fmt.Errorf("requires 2 arguments: <source-repo> <target-org> (or use --config)")
 	}
 
 	if allMetadata {
@@ -194,229 +231,136 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	if verifyOnly && skipVerify {
-		return fmt.Errorf("cannot use --verify-only and --skip-verify together")
+		return "", "", "", fmt.Errorf("cannot use --verify-only and --skip-verify together")
 	}
 
 	if err := validateVisibility(targetVisibility); err != nil {
-		return err
+		return "", "", "", err
 	}
 
-	// Resolve target repo name
-	repoName := targetName
+	repoName = targetName
 	if repoName == "" {
-		_, name, err := parseRepo(sourceRepo)
-		if err != nil {
-			return err
+		_, name, parseErr := parseRepo(sourceRepo)
+		if parseErr != nil {
+			return "", "", "", parseErr
 		}
 		repoName = name
 	}
 
-	if dryRun {
-		fmt.Println("=== DRY RUN ===")
-		fmt.Printf("Source:      %s/%s (public: %v)\n", sourceHost, sourceRepo, publicSource)
-		fmt.Printf("Target:      %s/%s/%s (visibility: %s)\n", targetHost, targetOrg, repoName, targetVisibility)
-		fmt.Printf("LFS:         %v\n", lfs)
-		fmt.Printf("Metadata:    issues=%v, PRs=%v, wiki=%v\n", copyIssues, copyPRs, copyWiki)
-		fmt.Printf("Code only:   %v\n", codeOnly)
-		fmt.Printf("Exclude:     no-workflows=%v, no-actions=%v, no-copilot=%v, no-github=%v, paths=%v\n", noWorkflows, noActions, noCopilot, noGitHub, excludePaths)
-		fmt.Printf("Verify:      skip=%v, quick=%v, only=%v, since=%q\n", skipVerify, quickVerify, verifyOnly, since)
-		fmt.Printf("Report:      %s\n", reportPath)
-		fmt.Printf("Attestation: %s\n", signKey)
-		return nil
-	}
+	return sourceRepo, targetOrg, repoName, nil
+}
 
-	// Authenticate
-	var srcToken, tgtToken string
-	var err error
-	if publicSource {
-		fmt.Println("Public source mode: skipping source authentication")
-		if sourceToken != "" {
-			srcToken = sourceToken
-			fmt.Println("  Using --source-token for authenticated access (5,000 req/hr)")
-		} else if copyIssues || copyPRs {
-			fmt.Println("Note: Metadata copy from public repos uses unauthenticated API access (60 req/hr rate limit).")
-			fmt.Println("      For repos with many issues/PRs/releases, consider providing a source token for higher limits.")
-		}
-		tgtToken, err = auth.AuthenticateTarget(authMethod, targetHost, targetToken)
-		if err != nil {
-			return fmt.Errorf("target authentication failed: %w", err)
-		}
-	} else {
-		srcToken, tgtToken, err = auth.Authenticate(authMethod, sourceHost, targetHost, sourceToken, targetToken)
-		if err != nil {
-			return fmt.Errorf("authentication failed: %w", err)
-		}
-	}
+// printRunDryRun prints the single-repo dry run plan.
+func printRunDryRun(sourceRepo, targetOrg, repoName string) {
+	fmt.Println("=== DRY RUN ===")
+	fmt.Printf("Source:      %s/%s (public: %v)\n", sourceHost, sourceRepo, publicSource)
+	fmt.Printf("Target:      %s/%s/%s (visibility: %s)\n", targetHost, targetOrg, repoName, targetVisibility)
+	fmt.Printf("LFS:         %v\n", lfs)
+	fmt.Printf("Metadata:    issues=%v, PRs=%v, wiki=%v\n", copyIssues, copyPRs, copyWiki)
+	fmt.Printf("Code only:   %v\n", codeOnly)
+	fmt.Printf("Exclude:     no-workflows=%v, no-actions=%v, no-copilot=%v, no-github=%v, paths=%v\n", noWorkflows, noActions, noCopilot, noGitHub, excludePaths)
+	fmt.Printf("Verify:      skip=%v, quick=%v, only=%v, since=%q\n", skipVerify, quickVerify, verifyOnly, since)
+	fmt.Printf("Report:      %s\n", reportPath)
+	fmt.Printf("Attestation: %s\n", signKey)
+}
 
+// buildRunClients creates source and target API clients and parses the source repo.
+func buildRunClients(srcToken, tgtToken, sourceRepo string) (*ghclient.Client, *ghclient.Client, string, string, error) {
 	srcClient, err := ghclient.NewClient(sourceHost, srcToken)
 	if err != nil {
-		return fmt.Errorf("failed to create source client: %w", err)
+		return nil, nil, "", "", fmt.Errorf("failed to create source client: %w", err)
 	}
 	tgtClient, err := ghclient.NewClient(targetHost, tgtToken)
 	if err != nil {
-		return fmt.Errorf("failed to create target client: %w", err)
+		return nil, nil, "", "", fmt.Errorf("failed to create target client: %w", err)
 	}
-
 	srcOwner, srcName, err := parseRepo(sourceRepo)
 	if err != nil {
-		return err
+		return nil, nil, "", "", err
+	}
+	return srcClient, tgtClient, srcOwner, srcName, nil
+}
+
+// performRepoCopy handles repo creation, mirroring, releases, and metadata for single-repo mode.
+func performRepoCopy(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targetOrg, repoName, srcToken, tgtToken string) ([]string, error) {
+	fmt.Printf("Creating target repository %s/%s on %s (visibility: %s)...\n", targetOrg, repoName, targetHost, targetVisibility)
+
+	exists, existErr := tgtClient.RepoExists(targetOrg, repoName)
+	if existErr != nil {
+		if !force {
+			return nil, fmt.Errorf("cannot verify if target repo exists: %w\n  Use --force to bypass this check", existErr)
+		}
+		fmt.Printf("  Warning: could not check if target repo exists: %v\n", existErr)
+		fmt.Println("  Proceeding because --force was specified.")
 	}
 
-	var rejectedRefs []string
-
-	if !verifyOnly {
-		fmt.Printf("Creating target repository %s/%s on %s (visibility: %s)...\n", targetOrg, repoName, targetHost, targetVisibility)
-
-		// Check if target repo already exists
-		exists, existErr := tgtClient.RepoExists(targetOrg, repoName)
-		if existErr != nil {
-			if !force {
-				return fmt.Errorf("cannot verify if target repo exists: %w\n  Use --force to bypass this check", existErr)
+	forceOverwrite := false
+	if exists {
+		if force {
+			fmt.Println()
+			fmt.Printf("  ⚠️  WARNING: Target repository %s/%s already exists on %s.\n", targetOrg, repoName, targetHost)
+			fmt.Println("  --force mode: a mirror push will OVERWRITE all branches, tags, and history.")
+			fmt.Println("  Any content in the target that does not exist in the source WILL BE PERMANENTLY LOST.")
+			fmt.Println()
+			if !nonInteractive && !confirmAction("Do you want to continue and overwrite the existing repository?") {
+				fmt.Println("Aborted.")
+				return nil, nil
 			}
-			fmt.Printf("  Warning: could not check if target repo exists: %v\n", existErr)
-			fmt.Println("  Proceeding because --force was specified.")
-		}
-
-		forceOverwrite := false
-		if exists {
-			if force {
-				// --force: destructive mirror push (overwrites everything)
-				fmt.Println()
-				fmt.Printf("  ⚠️  WARNING: Target repository %s/%s already exists on %s.\n", targetOrg, repoName, targetHost)
-				fmt.Println("  --force mode: a mirror push will OVERWRITE all branches, tags, and history.")
-				fmt.Println("  Any content in the target that does not exist in the source WILL BE PERMANENTLY LOST.")
-				fmt.Println()
-				if !nonInteractive && !confirmAction("Do you want to continue and overwrite the existing repository?") {
-					fmt.Println("Aborted.")
-					return nil
-				}
-				fmt.Println()
-				forceOverwrite = true
-			} else {
-				// Default: additive push (preserves existing tags and releases)
-				fmt.Printf("  Repository %s/%s already exists. Using additive mode (existing tags and releases preserved).\n", targetOrg, repoName)
-			}
+			fmt.Println()
+			forceOverwrite = true
 		} else {
-			if err := tgtClient.CreateRepo(targetOrg, repoName, targetVisibility, verbose); err != nil {
-				return fmt.Errorf("failed to create target repo: %w", err)
-			}
+			fmt.Printf("  Repository %s/%s already exists. Using additive mode (existing tags and releases preserved).\n", targetOrg, repoName)
 		}
-
-		fmt.Printf("Mirroring %s/%s from %s to %s/%s on %s...\n", srcOwner, srcName, sourceHost, targetOrg, repoName, targetHost)
-		rejectedRefs, err = vcopy.MirrorRepo(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, lfs, forceOverwrite, codeOnly, verbose)
-		if err != nil {
-			return fmt.Errorf("mirror failed: %w", err)
-		}
-
-		// Auto-sync releases and tags (unless --code-only)
-		if !codeOnly {
-			if exists && !forceOverwrite {
-				fmt.Println("Syncing new releases to target (existing releases preserved)...")
-				if err := vcopy.SyncReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-					if ghclient.IsRateLimitError(err) {
-						fmt.Println("⚠ Release sync aborted: API rate limit exhausted. Releases may be incomplete.")
-						fmt.Println("  Re-run with --source-token or wait for rate limit reset.")
-					} else {
-						fmt.Printf("Warning: release sync failed: %v\n", err)
-					}
-				}
-			} else if exists && forceOverwrite {
-				// --force on existing repo: clean orphaned releases, then copy all from source
-				fmt.Println("Cleaning orphaned releases from target...")
-				if err := vcopy.CleanTargetReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-					fmt.Printf("Warning: release cleanup failed: %v\n", err)
-				}
-				fmt.Println("Copying releases...")
-				if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-					if ghclient.IsRateLimitError(err) {
-						fmt.Println("⚠ Release copy aborted: API rate limit exhausted. Releases may be incomplete.")
-						fmt.Println("  Re-run with --source-token or wait for rate limit reset.")
-					} else {
-						fmt.Printf("Warning: release copy failed: %v\n", err)
-					}
-				}
-			} else {
-				// New repo: copy all releases from source
-				fmt.Println("Copying releases...")
-				if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-					if ghclient.IsRateLimitError(err) {
-						fmt.Println("⚠ Release copy aborted: API rate limit exhausted. Releases may be incomplete.")
-						fmt.Println("  Re-run with --source-token or wait for rate limit reset.")
-					} else {
-						fmt.Printf("Warning: release copy failed: %v\n", err)
-					}
-				}
-			}
-		} else if verbose {
-			fmt.Println("  Skipping tags and releases (--code-only mode)")
-		}
-
-		if copyIssues {
-			fmt.Println("Copying issues...")
-			if err := vcopy.CopyIssues(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-				return fmt.Errorf("issue copy failed: %w", err)
-			}
-		}
-		if copyPRs {
-			fmt.Println("Copying pull requests...")
-			if err := vcopy.CopyPullRequests(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
-				return fmt.Errorf("PR copy failed: %w", err)
-			}
-		}
-		if copyWiki {
-			fmt.Println("Copying wiki...")
-			if err := vcopy.CopyWiki(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, verbose); err != nil {
-				fmt.Printf("Warning: wiki copy failed (wiki may not exist): %v\n", err)
-			}
-		}
-	}
-
-	if !skipVerify {
-		fmt.Println("\n=== Running Integrity Verification ===")
-
-		var results *verify.VerificationReport
-		opts := verify.Options{
-			QuickMode:    quickVerify,
-			CodeOnly:     codeOnly,
-			Verbose:      verbose,
-			ExcludedRefs: rejectedRefs,
-		}
-		if since != "" {
-			results, err = verify.RunIncremental(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, since, opts)
-		} else {
-			results, err = verify.RunAll(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, opts)
-		}
-		if err != nil {
-			return fmt.Errorf("verification failed: %w", err)
-		}
-
-		if signKey != "" {
-			fmt.Printf("Signing verification report with key %s...\n", signKey)
-			if err := report.SignReport(results, signKey); err != nil {
-				return fmt.Errorf("attestation signature failed: %w", err)
-			}
-			fmt.Println("Attestation Signature applied")
-		}
-
-		report.PrintTerminal(results)
-
-		if reportPath != "" {
-			if err := report.WriteJSON(results, reportPath); err != nil {
-				return fmt.Errorf("failed to write report: %w", err)
-			}
-			fmt.Printf("\nJSON report written to: %s\n", reportPath)
-		}
-
-		if !results.AllPassed() {
-			return fmt.Errorf("VERIFICATION FAILED: one or more checks did not pass")
-		}
-
-		fmt.Println("\nAll verification checks passed. Repository copy is verified.")
 	} else {
-		fmt.Println("\nCopy complete (verification skipped).")
+		if err := tgtClient.CreateRepo(targetOrg, repoName, targetVisibility, verbose); err != nil {
+			return nil, fmt.Errorf("failed to create target repo: %w", err)
+		}
 	}
 
-	// Exclude paths from target (post-verification cleanup commit)
+	fmt.Printf("Mirroring %s/%s from %s to %s/%s on %s...\n", srcOwner, srcName, sourceHost, targetOrg, repoName, targetHost)
+	rejectedRefs, err := vcopy.MirrorRepo(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, lfs, forceOverwrite, codeOnly, verbose)
+	if err != nil {
+		return nil, fmt.Errorf("mirror failed: %w", err)
+	}
+
+	if !codeOnly {
+		syncReleasesToTarget(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, exists, forceOverwrite)
+	} else if verbose {
+		fmt.Println("  Skipping tags and releases (--code-only mode)")
+	}
+
+	if err := copyMetadata(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, srcToken, tgtToken); err != nil {
+		return rejectedRefs, err
+	}
+
+	return rejectedRefs, nil
+}
+
+// copyMetadata copies issues, PRs, and wiki as requested by flags.
+func copyMetadata(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targetOrg, repoName, srcToken, tgtToken string) error {
+	if copyIssues {
+		fmt.Println("Copying issues...")
+		if err := vcopy.CopyIssues(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+			return fmt.Errorf("issue copy failed: %w", err)
+		}
+	}
+	if copyPRs {
+		fmt.Println("Copying pull requests...")
+		if err := vcopy.CopyPullRequests(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+			return fmt.Errorf("PR copy failed: %w", err)
+		}
+	}
+	if copyWiki {
+		fmt.Println("Copying wiki...")
+		if err := vcopy.CopyWiki(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, verbose); err != nil {
+			fmt.Printf("Warning: wiki copy failed (wiki may not exist): %v\n", err)
+		}
+	}
+	return nil
+}
+
+// handleExcludePaths removes excluded paths from the target repo.
+func handleExcludePaths(targetOrg, repoName, tgtToken string) error {
 	excludeList, err := vcopy.BuildExcludePaths(noWorkflows, noActions, noCopilot, noGitHub, excludePaths)
 	if err != nil {
 		return fmt.Errorf("invalid exclude paths: %w", err)
@@ -426,11 +370,22 @@ func run(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("exclude cleanup failed: %w", err)
 		}
 	}
-
 	return nil
 }
 
+// applyConfig applies all sections of a parsed YAML config to the global flags.
+// CLI flags take precedence — config values are only used when the flag was not set.
 func applyConfig(cfg *config.Config, flags *pflag.FlagSet) {
+	applyHostConfig(cfg, flags)
+	applyAuthConfig(cfg)
+	applyCopyConfig(cfg)
+	applyVerifyConfig(cfg)
+	applyExcludeConfig(cfg)
+}
+
+// applyHostConfig sets source/target host, target name, visibility, and public-source
+// from config when the corresponding CLI flags are still at their defaults.
+func applyHostConfig(cfg *config.Config, flags *pflag.FlagSet) {
 	if sourceHost == "github.com" && cfg.Source.Host != "" {
 		sourceHost = cfg.Source.Host
 	}
@@ -440,6 +395,16 @@ func applyConfig(cfg *config.Config, flags *pflag.FlagSet) {
 	if targetName == "" && cfg.Target.Name != "" {
 		targetName = cfg.Target.Name
 	}
+	if (flags == nil || !flags.Changed("visibility")) && cfg.Target.Visibility != "" {
+		targetVisibility = cfg.Target.Visibility
+	}
+	if !publicSource {
+		publicSource = cfg.Source.Public
+	}
+}
+
+// applyAuthConfig sets auth method and tokens from config when not already provided via CLI flags.
+func applyAuthConfig(cfg *config.Config) {
 	if authMethod == "auto" && cfg.Auth.Method != "" {
 		authMethod = cfg.Auth.Method
 	}
@@ -449,12 +414,11 @@ func applyConfig(cfg *config.Config, flags *pflag.FlagSet) {
 	if targetToken == "" && cfg.Auth.TargetToken != "" {
 		targetToken = cfg.Auth.TargetToken
 	}
-	if !publicSource {
-		publicSource = cfg.Source.Public
-	}
-	if (flags == nil || !flags.Changed("visibility")) && cfg.Target.Visibility != "" {
-		targetVisibility = cfg.Target.Visibility
-	}
+}
+
+// applyCopyConfig sets LFS, force, code-only, metadata, verbose, and non-interactive
+// flags from config when the corresponding CLI flags are still at their defaults.
+func applyCopyConfig(cfg *config.Config) {
 	if !lfs {
 		lfs = cfg.LFS
 	}
@@ -476,6 +440,17 @@ func applyConfig(cfg *config.Config, flags *pflag.FlagSet) {
 	if !allMetadata {
 		allMetadata = cfg.Copy.AllMetadata
 	}
+	if !verbose {
+		verbose = cfg.Verbose
+	}
+	if !nonInteractive {
+		nonInteractive = cfg.NonInteractive
+	}
+}
+
+// applyVerifyConfig sets skip-verify, quick-verify, verify-only, since, report path,
+// and sign key from config when the corresponding CLI flags are still at their defaults.
+func applyVerifyConfig(cfg *config.Config) {
 	if !skipVerify {
 		skipVerify = cfg.Verify.Skip
 	}
@@ -494,12 +469,11 @@ func applyConfig(cfg *config.Config, flags *pflag.FlagSet) {
 	if signKey == "" && cfg.Report.SignKey != "" {
 		signKey = cfg.Report.SignKey
 	}
-	if !verbose {
-		verbose = cfg.Verbose
-	}
-	if !nonInteractive {
-		nonInteractive = cfg.NonInteractive
-	}
+}
+
+// applyExcludeConfig sets no-workflows, no-actions, no-copilot, no-github, and
+// custom exclude paths from config when the corresponding CLI flags are still at their defaults.
+func applyExcludeConfig(cfg *config.Config) {
 	if !noWorkflows {
 		noWorkflows = cfg.Exclude.Workflows
 	}
@@ -556,6 +530,132 @@ func confirmAction(prompt string) bool {
 	return answer == "yes" || answer == "y"
 }
 
+// authenticate handles source and target authentication for both public and private modes.
+func authenticate() (string, string, error) {
+	if publicSource {
+		fmt.Println("Public source mode: skipping source authentication")
+		var srcTok string
+		if sourceToken != "" {
+			srcTok = sourceToken
+			fmt.Println("  Using --source-token for authenticated access (5,000 req/hr)")
+		}
+		if (copyIssues || copyPRs) && srcTok == "" {
+			fmt.Println("  Warning: --source-token recommended for metadata copy (unauthenticated rate limit is 60 req/hr)")
+		}
+		tgtTok, err := auth.AuthenticateTarget(authMethod, targetHost, targetToken)
+		if err != nil {
+			return "", "", fmt.Errorf("target authentication failed: %w", err)
+		}
+		return srcTok, tgtTok, nil
+	}
+	srcTok, tgtTok, err := auth.Authenticate(authMethod, sourceHost, targetHost, sourceToken, targetToken)
+	if err != nil {
+		return "", "", fmt.Errorf("authentication failed: %w", err)
+	}
+	return srcTok, tgtTok, nil
+}
+
+// syncReleasesToTarget handles the three release-copy strategies for single-repo mode.
+func syncReleasesToTarget(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targetOrg, repoName string, exists, forceOverwrite bool) {
+	if exists && !forceOverwrite {
+		fmt.Printf("Syncing releases (additive — new releases only)...\n")
+		if err := vcopy.SyncReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+			fmt.Printf("Warning: release sync failed: %v\n", err)
+		}
+	} else if exists && forceOverwrite {
+		fmt.Println("Cleaning target releases (force mode)...")
+		if err := vcopy.CleanTargetReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+			fmt.Printf("Warning: failed to clean target releases: %v\n", err)
+		}
+		fmt.Println("Copying releases...")
+		if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+			fmt.Printf("Warning: release copy failed: %v\n", err)
+		}
+	} else {
+		fmt.Println("Copying releases...")
+		if err := vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, repoName, verbose); err != nil {
+			fmt.Printf("Warning: release copy failed: %v\n", err)
+		}
+	}
+}
+
+// runAndReportVerification runs verification, optionally signs and writes the report.
+func runAndReportVerification(srcOwner, srcName, targetOrg, repoName, srcToken, tgtToken string, rejectedRefs []string) error {
+	fmt.Println("\n=== Running Integrity Verification ===")
+
+	opts := verify.Options{
+		QuickMode:    quickVerify,
+		CodeOnly:     codeOnly,
+		Verbose:      verbose,
+		ExcludedRefs: rejectedRefs,
+	}
+
+	var results *verify.VerificationReport
+	var err error
+	if since != "" {
+		results, err = verify.RunIncremental(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, since, opts)
+	} else {
+		results, err = verify.RunAll(sourceHost, srcOwner, srcName, targetHost, targetOrg, repoName, srcToken, tgtToken, opts)
+	}
+	if err != nil {
+		return fmt.Errorf("verification failed: %w", err)
+	}
+
+	if signKey != "" {
+		fmt.Printf("Signing verification report with key %s...\n", signKey)
+		if err := report.SignReport(results, signKey); err != nil {
+			return fmt.Errorf("attestation signature failed: %w", err)
+		}
+		fmt.Println("Attestation Signature applied")
+	}
+
+	report.PrintTerminal(results)
+
+	if reportPath != "" {
+		if err := report.WriteJSON(results, reportPath); err != nil {
+			return fmt.Errorf("failed to write report: %w", err)
+		}
+		fmt.Printf("\nJSON report written to: %s\n", reportPath)
+	}
+
+	if !results.AllPassed() {
+		return fmt.Errorf("VERIFICATION FAILED: one or more checks did not pass")
+	}
+
+	fmt.Println("\nAll verification checks passed. Repository copy is verified.")
+	return nil
+}
+
+// printBatchDryRun prints the batch plan without executing.
+func printBatchDryRun(sourceOrg, targetOrg string, repos []string) {
+	mode := "Copy"
+	verb := "copied"
+	if batchSync {
+		mode = "Sync"
+		verb = "synced"
+	}
+	fmt.Printf("=== DRY RUN — Batch %s Plan ===\n", mode)
+	fmt.Printf("Source org:  %s (%s)\n", sourceOrg, sourceHost)
+	fmt.Printf("Target org:  %s (%s)\n", targetOrg, targetHost)
+	fmt.Printf("Name format: %s{name}%s\n", batchPrefix, batchSuffix)
+	fmt.Printf("Flags:       no-github=%v, no-workflows=%v, no-actions=%v, no-copilot=%v, skip-verify=%v, code-only=%v, sync=%v\n",
+		noGitHub, noWorkflows, noActions, noCopilot, skipVerify, codeOnly, batchSync)
+	fmt.Println()
+	for i, name := range repos {
+		targetRepoName := batchPrefix + name + batchSuffix
+		fmt.Printf("  [%d/%d] %s/%s → %s/%s\n", i+1, len(repos), sourceOrg, name, targetOrg, targetRepoName)
+	}
+	fmt.Printf("\nTotal: %d repositories would be %s.\n", len(repos), verb)
+}
+
+// batchState tracks counters and results across the batch loop.
+type batchState struct {
+	succeeded, failed, skipped, releasesSkipped int
+	failures                                    []string
+	repoResults                                 []report.BatchRepoResult
+	rateLimitHit                                bool
+}
+
 // batchRun implements the `vcopy batch` subcommand.
 func batchRun(cmd *cobra.Command, args []string) error {
 	sourceOrg := args[0]
@@ -569,36 +669,14 @@ func batchRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Authenticate
-	var srcToken, tgtToken string
-	var err error
-	if publicSource {
-		fmt.Println("Public source mode: skipping source authentication")
-		if sourceToken != "" {
-			srcToken = sourceToken
-			fmt.Println("  Using --source-token for authenticated access (5,000 req/hr)")
-		}
-		tgtToken, err = auth.AuthenticateTarget(authMethod, targetHost, targetToken)
-		if err != nil {
-			return fmt.Errorf("target authentication failed: %w", err)
-		}
-	} else {
-		srcToken, tgtToken, err = auth.Authenticate(authMethod, sourceHost, targetHost, sourceToken, targetToken)
-		if err != nil {
-			return fmt.Errorf("authentication failed: %w", err)
-		}
+	srcToken, tgtToken, err := authenticate()
+	if err != nil {
+		return err
 	}
 
-	// Build a client for search (use source token for auth, or unauthenticated for public)
-	searchClient, err := ghclient.NewClient(sourceHost, srcToken)
+	repos, err := discoverBatchRepos(srcToken, sourceOrg)
 	if err != nil {
-		return fmt.Errorf("failed to create source client: %w", err)
-	}
-
-	fmt.Printf("Searching for repos matching %q in %s...\n", batchSearch, sourceOrg)
-	repos, err := searchClient.SearchRepos(sourceOrg, batchSearch)
-	if err != nil {
-		return fmt.Errorf("repo search failed: %w", err)
+		return err
 	}
 	if len(repos) == 0 {
 		fmt.Println("No repositories found matching the search filter.")
@@ -606,156 +684,166 @@ func batchRun(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Found %d repositories\n\n", len(repos))
 
-	// Dry run: just print the mapping
 	if dryRun {
-		mode := "Copy"
-		verb := "copied"
-		if batchSync {
-			mode = "Sync"
-			verb = "synced"
-		}
-		fmt.Printf("=== DRY RUN — Batch %s Plan ===\n", mode)
-		fmt.Printf("Source org:  %s (%s)\n", sourceOrg, sourceHost)
-		fmt.Printf("Target org:  %s (%s)\n", targetOrg, targetHost)
-		fmt.Printf("Name format: %s{name}%s\n", batchPrefix, batchSuffix)
-		fmt.Printf("Flags:       no-github=%v, no-workflows=%v, no-actions=%v, no-copilot=%v, skip-verify=%v, code-only=%v, sync=%v\n",
-			noGitHub, noWorkflows, noActions, noCopilot, skipVerify, codeOnly, batchSync)
-		fmt.Println()
-		for i, name := range repos {
-			targetRepoName := batchPrefix + name + batchSuffix
-			fmt.Printf("  [%d/%d] %s/%s → %s/%s\n", i+1, len(repos), sourceOrg, name, targetOrg, targetRepoName)
-		}
-		fmt.Printf("\nTotal: %d repositories would be %s.\n", len(repos), verb)
+		printBatchDryRun(sourceOrg, targetOrg, repos)
 		return nil
 	}
 
-	// Build shared clients and exclude list
-	tgtClient, err := ghclient.NewClient(targetHost, tgtToken)
+	srcClient, tgtClient, excludeList, err := initBatchClients(srcToken, tgtToken)
 	if err != nil {
-		return fmt.Errorf("failed to create target client: %w", err)
+		return err
 	}
 
-	excludeList, err := vcopy.BuildExcludePaths(noWorkflows, noActions, noCopilot, noGitHub, excludePaths)
-	if err != nil {
-		return fmt.Errorf("invalid exclude paths: %w", err)
-	}
-
-	srcClient, err := ghclient.NewClient(sourceHost, srcToken)
-	if err != nil {
-		return fmt.Errorf("failed to create source client: %w", err)
-	}
-
-	// Execute batch
-	var succeeded, failed, skipped int
-	var releasesSkipped int
-	var failures []string
-	var repoResults []report.BatchRepoResult
-	rateLimitHit := false
-
+	state := &batchState{}
 	for i, name := range repos {
-		// Batch pacing: sleep between repos to avoid secondary rate limits
 		if i > 0 && batchDelay > 0 {
 			time.Sleep(batchDelay)
 		}
+		processBatchRepo(srcClient, tgtClient, sourceOrg, name, targetOrg, srcToken, tgtToken, excludeList, repos, i, state)
+	}
 
-		targetRepoName := batchPrefix + name + batchSuffix
-		sourceRepo := sourceOrg + "/" + name
-		prefix := fmt.Sprintf("[%d/%d]", i+1, len(repos))
+	return writeBatchReportAndSummary(sourceOrg, targetOrg, repos, state)
+}
 
-		// Check if target already exists (skip-existing)
-		if batchSkipExist {
-			exists, existErr := tgtClient.RepoExists(targetOrg, targetRepoName)
-			if existErr != nil {
-				fmt.Printf("%s ⚠ Warning: could not check if %s/%s exists: %v\n", prefix, targetOrg, targetRepoName, existErr)
-			}
-			if exists {
-				fmt.Printf("%s Skipping %s (target %s/%s already exists)\n", prefix, name, targetOrg, targetRepoName)
-				skipped++
-				repoResults = append(repoResults, report.BatchRepoResult{
-					SourceRepo: sourceRepo,
-					TargetRepo: targetOrg + "/" + targetRepoName,
-					Status:     "skipped",
-				})
-				continue
-			}
+// discoverBatchRepos creates a search client and finds matching repos.
+func discoverBatchRepos(srcToken, sourceOrg string) ([]string, error) {
+	searchClient, err := ghclient.NewClient(sourceHost, srcToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create source client: %w", err)
+	}
+	fmt.Printf("Searching for repos matching %q in %s...\n", batchSearch, sourceOrg)
+	repos, err := searchClient.SearchRepos(sourceOrg, batchSearch)
+	if err != nil {
+		return nil, fmt.Errorf("repo search failed: %w", err)
+	}
+	return repos, nil
+}
+
+// initBatchClients creates source/target API clients and the exclude list for batch operations.
+func initBatchClients(srcToken, tgtToken string) (*ghclient.Client, *ghclient.Client, []string, error) {
+	tgtClient, err := ghclient.NewClient(targetHost, tgtToken)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create target client: %w", err)
+	}
+	excludeList, err := vcopy.BuildExcludePaths(noWorkflows, noActions, noCopilot, noGitHub, excludePaths)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("invalid exclude paths: %w", err)
+	}
+	srcClient, err := ghclient.NewClient(sourceHost, srcToken)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create source client: %w", err)
+	}
+	return srcClient, tgtClient, excludeList, nil
+}
+
+// processBatchRepo handles a single repo in the batch loop: skip-existing, copy with retry, and result tracking.
+func processBatchRepo(srcClient, tgtClient *ghclient.Client, sourceOrg, name, targetOrg, srcToken, tgtToken string, excludeList []string, repos []string, i int, state *batchState) {
+	targetRepoName := batchPrefix + name + batchSuffix
+	sourceRepo := sourceOrg + "/" + name
+	prefix := fmt.Sprintf("[%d/%d]", i+1, len(repos))
+
+	if batchSkipExist {
+		exists, existErr := tgtClient.RepoExists(targetOrg, targetRepoName)
+		if existErr != nil {
+			fmt.Printf("%s ⚠ Warning: could not check if %s/%s exists: %v\n", prefix, targetOrg, targetRepoName, existErr)
 		}
-
-		if batchSync {
-			fmt.Printf("\n%s Syncing %s → %s/%s\n", prefix, sourceRepo, targetOrg, targetRepoName)
-		} else {
-			fmt.Printf("\n%s Copying %s → %s/%s\n", prefix, sourceRepo, targetOrg, targetRepoName)
-		}
-
-		verifyResult, hitRL, err := copyOneRepo(srcClient, tgtClient, sourceOrg, name, targetOrg, targetRepoName, srcToken, tgtToken, excludeList, rateLimitHit, batchSync)
-
-		// If the error is a secondary rate limit, wait and retry once.
-		// Note: the rateLimitTransport already retried 3 times with up to 2-min waits each.
-		// This batch-level retry gives one more attempt after the full reset period.
-		if err != nil && ghclient.IsRateLimitError(err) {
-			retryAfter := ghclient.RetryAfterFromError(err)
-			if retryAfter <= 0 {
-				retryAfter = 60 * time.Second
-			}
-			if retryAfter <= 10*time.Minute {
-				fmt.Printf("%s ⏳ Secondary rate limit hit — waiting %v before retrying...\n", prefix, retryAfter.Truncate(time.Second))
-				time.Sleep(retryAfter + 5*time.Second)
-				verifyResult, hitRL, err = copyOneRepo(srcClient, tgtClient, sourceOrg, name, targetOrg, targetRepoName, srcToken, tgtToken, excludeList, rateLimitHit, batchSync)
-			} else {
-				fmt.Printf("%s ⚠ Secondary rate limit hit but retry-after too long (%v) — skipping retry\n", prefix, retryAfter.Truncate(time.Second))
-			}
-		}
-
-		if hitRL && !rateLimitHit {
-			rateLimitHit = true
-			remaining := len(repos) - i - 1
-			if remaining > 0 {
-				fmt.Printf("\n  ⚠ API rate limit exhausted — release copying will be skipped for the remaining %d repos.\n", remaining)
-				fmt.Println("    Git clone, push, and verification will continue normally.")
-				fmt.Println("    Re-run with a shorter batch or authenticated source to copy releases.")
-			}
-		} else if rateLimitHit && !codeOnly {
-			releasesSkipped++
-		}
-		if err != nil {
-			fmt.Printf("%s ✗ FAILED: %v\n", prefix, err)
-			failed++
-			failures = append(failures, fmt.Sprintf("%s: %v", sourceRepo, err))
-			entry := report.BatchRepoResult{
+		if exists {
+			fmt.Printf("%s Skipping %s (target %s/%s already exists)\n", prefix, name, targetOrg, targetRepoName)
+			state.skipped++
+			state.repoResults = append(state.repoResults, report.BatchRepoResult{
 				SourceRepo: sourceRepo,
 				TargetRepo: targetOrg + "/" + targetRepoName,
-				Status:     "failed",
-				Error:      err.Error(),
-			}
-			if verifyResult != nil {
-				entry.Checks = verifyResult.Checks
-			}
-			repoResults = append(repoResults, entry)
-			continue
+				Status:     "skipped",
+			})
+			return
 		}
-		fmt.Printf("%s ✓ Done\n", prefix)
-		succeeded++
+	}
+
+	if batchSync {
+		fmt.Printf("\n%s Syncing %s → %s/%s\n", prefix, sourceRepo, targetOrg, targetRepoName)
+	} else {
+		fmt.Printf("\n%s Copying %s → %s/%s\n", prefix, sourceRepo, targetOrg, targetRepoName)
+	}
+
+	verifyResult, hitRL, err := batchCopyWithRetry(srcClient, tgtClient, sourceOrg, name, targetOrg, targetRepoName, srcToken, tgtToken, excludeList, state.rateLimitHit, prefix)
+	updateRateLimitState(state, hitRL, len(repos)-i-1)
+
+	if err != nil {
+		fmt.Printf("%s ✗ FAILED: %v\n", prefix, err)
+		state.failed++
+		state.failures = append(state.failures, fmt.Sprintf("%s: %v", sourceRepo, err))
 		entry := report.BatchRepoResult{
 			SourceRepo: sourceRepo,
 			TargetRepo: targetOrg + "/" + targetRepoName,
-			Status:     "succeeded",
+			Status:     "failed",
+			Error:      err.Error(),
 		}
 		if verifyResult != nil {
 			entry.Checks = verifyResult.Checks
 		}
-		repoResults = append(repoResults, entry)
+		state.repoResults = append(state.repoResults, entry)
+		return
+	}
 
-		// Write per-repo report if requested
-		if batchPerRepoReport && reportPath != "" && verifyResult != nil {
-			perRepoPath := strings.TrimSuffix(reportPath, filepath.Ext(reportPath)) + "-" + name + ".json"
-			if err := report.WriteJSON(verifyResult, perRepoPath); err != nil {
-				fmt.Printf("  Warning: failed to write per-repo report: %v\n", err)
-			} else {
-				fmt.Printf("  Per-repo report: %s\n", perRepoPath)
-			}
+	fmt.Printf("%s ✓ Done\n", prefix)
+	state.succeeded++
+	entry := report.BatchRepoResult{
+		SourceRepo: sourceRepo,
+		TargetRepo: targetOrg + "/" + targetRepoName,
+		Status:     "succeeded",
+	}
+	if verifyResult != nil {
+		entry.Checks = verifyResult.Checks
+	}
+	state.repoResults = append(state.repoResults, entry)
+
+	if batchPerRepoReport && reportPath != "" && verifyResult != nil {
+		perRepoPath := strings.TrimSuffix(reportPath, filepath.Ext(reportPath)) + "-" + name + ".json"
+		if err := report.WriteJSON(verifyResult, perRepoPath); err != nil {
+			fmt.Printf("  Warning: failed to write per-repo report: %v\n", err)
+		} else {
+			fmt.Printf("  Per-repo report: %s\n", perRepoPath)
+		}
+	}
+}
+
+// batchCopyWithRetry calls copyOneRepo and retries once if a secondary rate limit is hit.
+func batchCopyWithRetry(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targetOrg, targetRepoName, srcToken, tgtToken string, excludeList []string, skipReleases bool, prefix string) (*verify.VerificationReport, bool, error) {
+	verifyResult, hitRL, err := copyOneRepo(srcClient, tgtClient, srcOwner, srcName, targetOrg, targetRepoName, srcToken, tgtToken, excludeList, skipReleases, batchSync)
+
+	if err != nil && ghclient.IsRateLimitError(err) {
+		retryAfter := ghclient.RetryAfterFromError(err)
+		if retryAfter <= 0 {
+			retryAfter = 60 * time.Second
+		}
+		if retryAfter <= 10*time.Minute {
+			fmt.Printf("%s ⏳ Secondary rate limit hit — waiting %v before retrying...\n", prefix, retryAfter.Truncate(time.Second))
+			time.Sleep(retryAfter + 5*time.Second)
+			verifyResult, hitRL, err = copyOneRepo(srcClient, tgtClient, srcOwner, srcName, targetOrg, targetRepoName, srcToken, tgtToken, excludeList, skipReleases, batchSync)
+		} else {
+			fmt.Printf("%s ⚠ Secondary rate limit hit but retry-after too long (%v) — skipping retry\n", prefix, retryAfter.Truncate(time.Second))
 		}
 	}
 
-	// Write combined batch report
+	return verifyResult, hitRL, err
+}
+
+// updateRateLimitState updates the batch state when a rate limit is first encountered.
+func updateRateLimitState(state *batchState, hitRL bool, remaining int) {
+	if hitRL && !state.rateLimitHit {
+		state.rateLimitHit = true
+		if remaining > 0 {
+			fmt.Printf("\n  ⚠ API rate limit exhausted — release copying will be skipped for the remaining %d repos.\n", remaining)
+			fmt.Println("    Git clone, push, and verification will continue normally.")
+			fmt.Println("    Re-run with a shorter batch or authenticated source to copy releases.")
+		}
+	} else if state.rateLimitHit && !codeOnly {
+		state.releasesSkipped++
+	}
+}
+
+// writeBatchReportAndSummary writes the batch JSON report and prints the summary.
+func writeBatchReportAndSummary(sourceOrg, targetOrg string, repos []string, state *batchState) error {
 	if reportPath != "" {
 		batchReport := &report.BatchReport{
 			SourceOrg:    sourceOrg,
@@ -766,12 +854,12 @@ func batchRun(cmd *cobra.Command, args []string) error {
 			Timestamp:    time.Now().UTC(),
 			Summary: report.BatchSummary{
 				Total:           len(repos),
-				Succeeded:       succeeded,
-				Failed:          failed,
-				Skipped:         skipped,
-				ReleasesSkipped: releasesSkipped,
+				Succeeded:       state.succeeded,
+				Failed:          state.failed,
+				Skipped:         state.skipped,
+				ReleasesSkipped: state.releasesSkipped,
 			},
-			Repos: repoResults,
+			Repos: state.repoResults,
 		}
 		if err := report.WriteBatchJSON(batchReport, reportPath); err != nil {
 			fmt.Printf("Warning: failed to write batch report: %v\n", err)
@@ -780,28 +868,27 @@ func batchRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Summary
 	fmt.Println()
 	fmt.Println("╔══════════════════════════════════════════════════════╗")
 	fmt.Println("║            VCOPY BATCH SUMMARY                     ║")
 	fmt.Println("╚══════════════════════════════════════════════════════╝")
 	fmt.Printf("  Total:     %d repositories\n", len(repos))
-	fmt.Printf("  Succeeded: %d\n", succeeded)
-	fmt.Printf("  Failed:    %d\n", failed)
-	fmt.Printf("  Skipped:   %d\n", skipped)
-	if releasesSkipped > 0 {
-		fmt.Printf("  Releases skipped (rate limit): %d\n", releasesSkipped)
+	fmt.Printf("  Succeeded: %d\n", state.succeeded)
+	fmt.Printf("  Failed:    %d\n", state.failed)
+	fmt.Printf("  Skipped:   %d\n", state.skipped)
+	if state.releasesSkipped > 0 {
+		fmt.Printf("  Releases skipped (rate limit): %d\n", state.releasesSkipped)
 	}
-	if len(failures) > 0 {
+	if len(state.failures) > 0 {
 		fmt.Println("\n  Failures:")
-		for _, f := range failures {
+		for _, f := range state.failures {
 			fmt.Printf("    - %s\n", f)
 		}
 	}
 	fmt.Println()
 
-	if failed > 0 {
-		return fmt.Errorf("%d of %d repos failed to copy", failed, len(repos))
+	if state.failed > 0 {
+		return fmt.Errorf("%d of %d repos failed to copy", state.failed, len(repos))
 	}
 	return nil
 }
@@ -839,25 +926,7 @@ func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targe
 	}
 
 	// Copy/sync releases (unless code-only or rate-limited)
-	hitRateLimit := false
-	if !codeOnly && !skipReleases {
-		var releaseErr error
-		if syncMode && repoExists {
-			releaseErr = vcopy.SyncReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, targetRepoName, verbose)
-		} else {
-			releaseErr = vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, targetRepoName, verbose)
-		}
-		if releaseErr != nil {
-			if ghclient.IsRateLimitError(releaseErr) {
-				hitRateLimit = true
-				fmt.Printf("  ⚠ Release copy skipped: API rate limit exhausted\n")
-			} else {
-				fmt.Printf("  Warning: release copy failed: %v\n", releaseErr)
-			}
-		}
-	} else if skipReleases && !codeOnly {
-		fmt.Printf("  ⚠ Release copy skipped (rate limit previously exhausted)\n")
-	}
+	hitRateLimit := handleBatchReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, targetRepoName, skipReleases, syncMode, repoExists)
 
 	// Verification
 	var results *verify.VerificationReport
@@ -886,6 +955,28 @@ func copyOneRepo(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targe
 	}
 
 	return results, hitRateLimit, nil
+}
+
+// handleBatchReleases handles the release copy/sync decision for a single repo in batch mode.
+func handleBatchReleases(srcClient, tgtClient *ghclient.Client, srcOwner, srcName, targetOrg, targetRepoName string, skipReleases, syncMode, repoExists bool) bool {
+	if !codeOnly && !skipReleases {
+		var releaseErr error
+		if syncMode && repoExists {
+			releaseErr = vcopy.SyncReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, targetRepoName, verbose)
+		} else {
+			releaseErr = vcopy.CopyReleases(srcClient, tgtClient, srcOwner, srcName, targetOrg, targetRepoName, verbose)
+		}
+		if releaseErr != nil {
+			if ghclient.IsRateLimitError(releaseErr) {
+				fmt.Printf("  ⚠ Release copy skipped: API rate limit exhausted\n")
+				return true
+			}
+			fmt.Printf("  Warning: release copy failed: %v\n", releaseErr)
+		}
+	} else if skipReleases && !codeOnly {
+		fmt.Printf("  ⚠ Release copy skipped (rate limit previously exhausted)\n")
+	}
+	return false
 }
 
 func validateVisibility(v string) error {
