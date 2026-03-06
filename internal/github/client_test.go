@@ -280,3 +280,88 @@ func TestIsRateLimitError_NonRateLimit(t *testing.T) {
 		t.Error("expected IsRateLimitError to return false for non-rate-limit error")
 	}
 }
+
+func TestRetryAfterFromError_AbuseWithRetryAfter(t *testing.T) {
+	d := 5 * time.Minute
+	err := &gh.AbuseRateLimitError{
+		Message:    "secondary rate limit",
+		RetryAfter: &d,
+	}
+	got := RetryAfterFromError(err)
+	if got != 5*time.Minute {
+		t.Errorf("RetryAfterFromError = %v, want 5m", got)
+	}
+}
+
+func TestRetryAfterFromError_AbuseWithoutRetryAfter(t *testing.T) {
+	err := &gh.AbuseRateLimitError{Message: "secondary rate limit"}
+	got := RetryAfterFromError(err)
+	if got != 0 {
+		t.Errorf("RetryAfterFromError = %v, want 0", got)
+	}
+}
+
+func TestRetryAfterFromError_Wrapped(t *testing.T) {
+	d := 3 * time.Minute
+	inner := &gh.AbuseRateLimitError{
+		Message:    "secondary rate limit",
+		RetryAfter: &d,
+	}
+	wrapped := fmt.Errorf("create repo: %w", inner)
+	got := RetryAfterFromError(wrapped)
+	if got != 3*time.Minute {
+		t.Errorf("RetryAfterFromError wrapped = %v, want 3m", got)
+	}
+}
+
+func TestRetryAfterFromError_NonRateLimit(t *testing.T) {
+	err := errors.New("some other error")
+	got := RetryAfterFromError(err)
+	if got != 0 {
+		t.Errorf("RetryAfterFromError non-rate-limit = %v, want 0", got)
+	}
+}
+
+func TestRetryAfterFromError_PrimaryRateLimit(t *testing.T) {
+	err := &gh.RateLimitError{Message: "primary"}
+	got := RetryAfterFromError(err)
+	if got != 0 {
+		t.Errorf("RetryAfterFromError primary = %v, want 0 (only abuse has RetryAfter)", got)
+	}
+}
+
+func TestRateLimitTransport_Secondary403WithRetryAfter(t *testing.T) {
+	attempts := 0
+	transport := &rateLimitTransport{
+		base: &mockTransportFunc{
+			fn: func(req *http.Request) (*http.Response, error) {
+				attempts++
+				if attempts == 1 {
+					return &http.Response{
+						StatusCode: http.StatusForbidden,
+						Header: http.Header{
+							"Retry-After": []string{"1"},
+						},
+						Body: io.NopCloser(strings.NewReader("secondary rate limit")),
+					}, nil
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader("ok")),
+				}, nil
+			},
+		},
+	}
+
+	req, _ := http.NewRequest("POST", "https://api.github.com/orgs/test/repos", nil)
+	resp, err := transport.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if attempts != 2 {
+		t.Errorf("expected 2 attempts (retry on secondary 403), got %d", attempts)
+	}
+}

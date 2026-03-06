@@ -556,6 +556,7 @@ vcopy batch Azure jpmicrosoft --search "terraform-azurerm-avm-" --public-source 
 | `--dry-run` | `false` | Preview the full source→target mapping without copying anything |
 | `--report` | | Path to write a combined JSON batch report with all repo results |
 | `--per-repo-report` | `false` | Also write individual JSON reports per repo (e.g., `report-reponame.json`) |
+| `--batch-delay` | `3s` | Delay between repos to avoid GitHub's secondary rate limits (e.g., `5s`, `0s` to disable) |
 
 All standard vcopy flags (`--public-source`, `--visibility`, `--no-github`, `--skip-verify`, `--code-only`, etc.) are also available and apply to every repo in the batch.
 
@@ -572,7 +573,8 @@ Target repo names follow the pattern `{prefix}{source-name}{suffix}`:
 
 ### Behavior
 
-- **Sequential execution**: Repos are copied one at a time (rate-limit friendly)
+- **Sequential execution**: Repos are copied one at a time with a configurable delay (`--batch-delay`, default 3s) to avoid secondary rate limits
+- **Secondary rate limit recovery**: If GitHub's secondary rate limit is hit, vcopy waits for the reset period and retries automatically
 - **Error handling**: If one repo fails, the batch skips it and continues to the next
 - **Progress**: Prints `[N/total] Copying repo-name...` for each repo
 - **Summary**: At the end, prints a report of succeeded/failed/skipped counts (plus releases-skipped if any were skipped due to rate limits)
@@ -741,9 +743,12 @@ vcopy automatically retries failed git operations and API calls with exponential
 
 In addition, all GitHub API calls automatically handle **rate limit responses**:
 - **Primary rate limit (403):** When a request receives a `403` with `X-RateLimit-Remaining: 0`, vcopy sleeps until the `X-RateLimit-Reset` time (plus a 5-second buffer) and retries.
+- **Secondary/abuse rate limit (403 + Retry-After):** When a request receives a `403` with a `Retry-After` header (GitHub's content creation throttle), vcopy sleeps for the specified duration (plus a 2-second buffer) and retries.
 - **Secondary/abuse rate limit (429):** When a request receives a `429 Too Many Requests`, vcopy reads the `Retry-After` header and sleeps for that duration (plus a 2-second buffer). If no `Retry-After` header is present, it waits 60 seconds.
 
-Both types retry up to 3 times per request, with a maximum single wait of 2 minutes. This applies to both authenticated and unauthenticated (`--public-source`) clients, so even with the 60 req/hr unauthenticated limit, operations will pause and resume rather than fail.
+All three types retry up to 3 times per request, with a maximum single wait of 2 minutes. This applies to both authenticated and unauthenticated (`--public-source`) clients, so even with the 60 req/hr unauthenticated limit, operations will pause and resume rather than fail.
+
+**Batch-level recovery:** In batch mode, if a secondary rate limit is hit during repo creation, vcopy waits for the full reset period (up to 10 minutes) and retries the failed repo automatically. The `--batch-delay` flag (default 3s) spaces out repo creations to prevent triggering secondary limits in the first place.
 
 This handles transient network failures and GitHub API rate limits gracefully.
 
