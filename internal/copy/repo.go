@@ -81,34 +81,15 @@ func MirrorRepo(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 	}
 
 	// Push to target
-	var rejectedRefs []string
 	sp = progress.Start(fmt.Sprintf("Pushing to %s/%s/%s...", tgtHost, tgtOrg, tgtName))
-	if forceOverwrite {
-		// Destructive: replace everything in target
-		pushErr := retry.Do(retry.Default(), "git push", func() error {
-			return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--mirror", tgtURL)
-		})
-		if pushErr != nil {
-			sp.StopFail()
-			return nil, fmt.Errorf("mirror push failed: %w", pushErr)
-		}
-	} else if codeOnly {
-		// Code only: push branches, skip tags entirely
-		rejected, pushErr := pushBranchesWithForce(verbose, srcToken, tgtToken, &mirrorPath, tgtURL)
-		if pushErr != nil {
-			sp.StopFail()
-			return nil, fmt.Errorf("push branches failed: %w", pushErr)
-		}
-		rejectedRefs = rejected
-	} else {
-		// Additive: force-update branches, push new tags (existing tags preserved)
-		rejected, pushErr := pushBranchesWithForce(verbose, srcToken, tgtToken, &mirrorPath, tgtURL)
-		if pushErr != nil {
-			sp.StopFail()
-			return nil, fmt.Errorf("push branches failed: %w", pushErr)
-		}
-		rejectedRefs = rejected
-		// Push tags without overwriting existing ones
+	rejectedRefs, err := pushToTarget(verbose, srcToken, tgtToken, &mirrorPath, tgtURL, forceOverwrite, codeOnly)
+	if err != nil {
+		sp.StopFail()
+		return nil, err
+	}
+
+	// Push tags for additive mode (not forceOverwrite, not codeOnly)
+	if !forceOverwrite && !codeOnly {
 		tagErr := retry.Do(retry.Default(), "git push tags", func() error {
 			return runGitCmd(verbose, srcToken, tgtToken, &mirrorPath, "push", "--tags", tgtURL)
 		})
@@ -247,6 +228,28 @@ func runGitCmdOutput(verbose bool, srcToken, tgtToken string, dir *string, args 
 		return sanitizedStderr, fmt.Errorf("%w: %s", err, sanitizedStderr)
 	}
 	return sanitizedStderr, nil
+}
+
+// pushToTarget consolidates the 3-way push strategy (forceOverwrite, codeOnly,
+// default additive) into a single helper. Tag pushes are handled by the caller.
+func pushToTarget(verbose bool, srcToken, tgtToken string, mirrorPath *string, tgtURL string, forceOverwrite, codeOnly bool) ([]string, error) {
+	if forceOverwrite {
+		// Destructive: replace everything in target
+		pushErr := retry.Do(retry.Default(), "git push", func() error {
+			return runGitCmd(verbose, srcToken, tgtToken, mirrorPath, "push", "--mirror", tgtURL)
+		})
+		if pushErr != nil {
+			return nil, fmt.Errorf("mirror push failed: %w", pushErr)
+		}
+		return nil, nil
+	}
+
+	// Both codeOnly and default additive mode push branches with force
+	rejected, pushErr := pushBranchesWithForce(verbose, srcToken, tgtToken, mirrorPath, tgtURL)
+	if pushErr != nil {
+		return nil, fmt.Errorf("push branches failed: %w", pushErr)
+	}
+	return rejected, nil
 }
 
 // pushBranchesWithForce pushes all branches with --force. If the remote rejects

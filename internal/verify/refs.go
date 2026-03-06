@@ -41,61 +41,7 @@ func VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 	}
 
 	excluded := buildExcludedSet(opts.ExcludedRefs)
-	var refResults []RefResult
-	var mismatches, excludedCount int
-
-	// Check all source refs exist in target with same SHA
-	for ref, srcSHA := range srcRefs {
-		if excluded[ref] {
-			excludedCount++
-			continue
-		}
-
-		tgtSHA, exists := tgtRefs[ref]
-		refType := "branch"
-		if strings.HasPrefix(ref, "refs/tags/") {
-			refType = "tag"
-		}
-
-		rr := RefResult{
-			Name:      ref,
-			Type:      refType,
-			SourceSHA: srcSHA,
-			TargetSHA: tgtSHA,
-			Match:     exists && srcSHA == tgtSHA,
-		}
-
-		if !rr.Match {
-			mismatches++
-			if opts.Verbose {
-				if !exists {
-					fmt.Printf("  MISSING in target: %s (%s)\n", ref, srcSHA)
-				} else {
-					fmt.Printf("  MISMATCH: %s source=%s target=%s\n", ref, srcSHA, tgtSHA)
-				}
-			}
-		}
-		refResults = append(refResults, rr)
-	}
-
-	// Check for extra refs in target. Excluded refs still exist in srcRefs, so
-	// they will not be incorrectly flagged as "extra".
-	// Extra target refs are expected in additive mode (prior runs, cleanup commits).
-	var extraTgt int
-	for ref, tgtSHA := range tgtRefs {
-		if _, exists := srcRefs[ref]; !exists {
-			refResults = append(refResults, RefResult{
-				Name:      ref,
-				Type:      "extra",
-				TargetSHA: tgtSHA,
-				Match:     false,
-			})
-			extraTgt++
-			if opts.Verbose {
-				fmt.Printf("  EXTRA in target: %s (%s)\n", ref, tgtSHA)
-			}
-		}
-	}
+	_, mismatches, excludedCount, extraTgt := compareRefSets(srcRefs, tgtRefs, excluded, opts.Verbose)
 
 	if mismatches > 0 {
 		result.Status = StatusFail
@@ -121,6 +67,64 @@ func VerifyRefs(srcHost, srcOwner, srcName, tgtHost, tgtOrg, tgtName, srcToken, 
 	}
 
 	return result, nil
+}
+
+// compareRefSets compares source and target ref maps, returning per-ref results
+// and aggregate counts for mismatches, excluded refs, and extra target refs.
+func compareRefSets(srcRefs, tgtRefs map[string]string, excluded map[string]bool, verbose bool) (refResults []RefResult, mismatches, excludedCount, extraTgt int) {
+	// Check all source refs exist in target with same SHA
+	for ref, srcSHA := range srcRefs {
+		if excluded[ref] {
+			excludedCount++
+			continue
+		}
+
+		tgtSHA, exists := tgtRefs[ref]
+		refType := "branch"
+		if strings.HasPrefix(ref, "refs/tags/") {
+			refType = "tag"
+		}
+
+		rr := RefResult{
+			Name:      ref,
+			Type:      refType,
+			SourceSHA: srcSHA,
+			TargetSHA: tgtSHA,
+			Match:     exists && srcSHA == tgtSHA,
+		}
+
+		if !rr.Match {
+			mismatches++
+			if verbose {
+				if !exists {
+					fmt.Printf("  MISSING in target: %s (%s)\n", ref, srcSHA)
+				} else {
+					fmt.Printf("  MISMATCH: %s source=%s target=%s\n", ref, srcSHA, tgtSHA)
+				}
+			}
+		}
+		refResults = append(refResults, rr)
+	}
+
+	// Check for extra refs in target. Excluded refs still exist in srcRefs, so
+	// they will not be incorrectly flagged as "extra".
+	// Extra target refs are expected in additive mode (prior runs, cleanup commits).
+	for ref, tgtSHA := range tgtRefs {
+		if _, exists := srcRefs[ref]; !exists {
+			refResults = append(refResults, RefResult{
+				Name:      ref,
+				Type:      "extra",
+				TargetSHA: tgtSHA,
+				Match:     false,
+			})
+			extraTgt++
+			if verbose {
+				fmt.Printf("  EXTRA in target: %s (%s)\n", ref, tgtSHA)
+			}
+		}
+	}
+
+	return refResults, mismatches, excludedCount, extraTgt
 }
 
 // listRemoteRefs uses git ls-remote to list all refs on a remote.

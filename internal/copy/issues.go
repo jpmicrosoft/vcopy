@@ -38,26 +38,6 @@ func CopyIssues(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRepo 
 			fmt.Printf("  Copying issue #%d: %s\n", issue.GetNumber(), issue.GetTitle())
 		}
 
-		// Build label names
-		var labelNames []string
-		for _, l := range issue.Labels {
-			labelNames = append(labelNames, l.GetName())
-		}
-
-		body := formatMigratedIssueBody(issue, srcOwner, srcRepo)
-
-		req := &gh.IssueRequest{
-			Title:  issue.Title,
-			Body:   &body,
-			Labels: &labelNames,
-		}
-
-		newIssue, err := tgt.CreateIssue(tgtOwner, tgtRepo, req)
-		if err != nil {
-			return fmt.Errorf("failed to create issue #%d: %w", issue.GetNumber(), err)
-		}
-
-		// Copy comments
 		comments, err := src.ListIssueComments(srcOwner, srcRepo, issue.GetNumber())
 		if err != nil {
 			if verbose {
@@ -65,28 +45,55 @@ func CopyIssues(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRepo 
 			}
 			continue
 		}
-		for _, comment := range comments {
-			commentBody := formatMigratedComment(comment)
-			if err := tgt.CreateIssueComment(tgtOwner, tgtRepo, newIssue.GetNumber(), commentBody); err != nil {
-				if verbose {
-					fmt.Printf("  Warning: failed to copy comment on issue #%d: %v\n", issue.GetNumber(), err)
-				}
-			}
-		}
 
-		// Close issue if it was closed in source
-		if issue.GetState() == "closed" {
-			closedState := "closed"
-			closeReq := &gh.IssueRequest{State: &closedState}
-			if err := tgt.EditIssue(tgtOwner, tgtRepo, newIssue.GetNumber(), closeReq); err != nil {
-				if verbose {
-					fmt.Printf("  Warning: failed to close issue #%d: %v\n", newIssue.GetNumber(), err)
-				}
-			}
+		if err := copyOneIssue(tgt, srcOwner, srcRepo, tgtOwner, tgtRepo, issue, comments, verbose); err != nil {
+			return err
 		}
 	}
 
 	fmt.Printf("  Copied %d issues\n", len(issues))
+	return nil
+}
+
+// copyOneIssue creates a single issue in the target repo and copies its comments.
+func copyOneIssue(tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRepo string, issue *gh.Issue, srcComments []*gh.IssueComment, verbose bool) error {
+	var labelNames []string
+	for _, l := range issue.Labels {
+		labelNames = append(labelNames, l.GetName())
+	}
+
+	body := formatMigratedIssueBody(issue, srcOwner, srcRepo)
+
+	req := &gh.IssueRequest{
+		Title:  issue.Title,
+		Body:   &body,
+		Labels: &labelNames,
+	}
+
+	newIssue, err := tgt.CreateIssue(tgtOwner, tgtRepo, req)
+	if err != nil {
+		return fmt.Errorf("failed to create issue #%d: %w", issue.GetNumber(), err)
+	}
+
+	for _, comment := range srcComments {
+		commentBody := formatMigratedComment(comment)
+		if err := tgt.CreateIssueComment(tgtOwner, tgtRepo, newIssue.GetNumber(), commentBody); err != nil {
+			if verbose {
+				fmt.Printf("  Warning: failed to copy comment on issue #%d: %v\n", issue.GetNumber(), err)
+			}
+		}
+	}
+
+	if issue.GetState() == "closed" {
+		closedState := "closed"
+		closeReq := &gh.IssueRequest{State: &closedState}
+		if err := tgt.EditIssue(tgtOwner, tgtRepo, newIssue.GetNumber(), closeReq); err != nil {
+			if verbose {
+				fmt.Printf("  Warning: failed to close issue #%d: %v\n", newIssue.GetNumber(), err)
+			}
+		}
+	}
+
 	return nil
 }
 
