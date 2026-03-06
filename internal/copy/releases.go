@@ -65,9 +65,7 @@ func syncReleases(src, tgt *ghclient.Client, srcOwner, srcRepo, tgtOwner, tgtRep
 	if incrementalOnly {
 		tgtReleases, err := tgt.ListReleases(tgtOwner, tgtRepo)
 		if err != nil {
-			if verbose {
-				fmt.Printf("  Warning: could not list target releases: %v\n", err)
-			}
+			fmt.Printf("  Warning: could not list target releases (falling back to full copy): %v\n", err)
 		} else {
 			for _, r := range tgtReleases {
 				existingTags[r.GetTagName()] = true

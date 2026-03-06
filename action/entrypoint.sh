@@ -166,6 +166,7 @@ if [ "${MODE}" = "batch" ]; then
   [ -n "${INPUT_PREFIX}" ] && ARGS+=("--prefix" "${INPUT_PREFIX}")
   [ -n "${INPUT_SUFFIX}" ] && ARGS+=("--suffix" "${INPUT_SUFFIX}")
   [ "${INPUT_SKIP_EXISTING}" = "true" ] && ARGS+=("--skip-existing")
+  [ "${INPUT_SYNC}" = "true" ] && ARGS+=("--sync")
   [ -n "${INPUT_REPORT}" ] && ARGS+=("--report" "${INPUT_REPORT}")
   [ "${INPUT_PER_REPO_REPORT}" = "true" ] && ARGS+=("--per-repo-report")
 else
