@@ -7,13 +7,54 @@
 
 **Copy GitHub repositories between organizations — Cloud, Enterprise, or both — with 5-layer cryptographic integrity verification.**
 
-vcopy mirrors branches, tags, commits, releases, and optionally issues/PRs/wiki, then runs five independent checks to prove the copy is bit-for-bit identical to the source. Available as a **CLI tool** and a **GitHub Action**.
+vcopy mirrors branches, tags, commits, releases, and optionally issues/PRs/wiki, then runs five complementary integrity checks to verify the copy is content-equivalent to the source. Each check targets a different failure mode so problems that slip past one layer get caught by another. Available as a **CLI tool** and a **GitHub Action**.
+
+---
+
+## Table of Contents
+
+- [Why vcopy?](#why-vcopy)
+- [Quick Start](#quick-start)
+- [Features](#features)
+- [Installation](#installation)
+- [Authentication](#authentication)
+- [Usage](#usage)
+- [Public Repositories](#public-repositories)
+- [Integrity Verification](#integrity-verification)
+- [Verification Technical Details](#verification-technical-details)
+- [Verification Failure Troubleshooting](#verification-failure-troubleshooting)
+- [Flags Reference](#flags-reference)
+- [Security](#security)
+- [Existing Repository Safety (`--force`)](#existing-repository-safety---force)
+- [Path Exclusion](#path-exclusion)
+- [Batch Copy](#batch-copy)
+- [Hidden Refs (refs/pull/*)](#hidden-refs-refspull)
+- [Git LFS Support](#git-lfs-support)
+- [Quick and Incremental Verification](#quick-and-incremental-verification)
+- [Attestation Signature](#attestation-signature)
+- [Config File](#config-file)
+- [Retry Behavior](#retry-behavior)
+- [GitHub Action](#github-action)
+- [Troubleshooting / FAQ](#troubleshooting--faq)
+- [Contributing](#contributing)
+
+---
+
+## Why vcopy?
+
+You can `git push --mirror` and call it done. Most teams do. The problem is you can't *prove* the mirror is complete. Git's internal hashing tells you a repository is consistent with itself, but it doesn't tell you whether the repo you just pushed to your target org is identical to what's sitting in the source. Once you cross an organizational boundary, you're trusting the transfer without verifying it.
+
+GitHub's native repository transfer works within a single GitHub instance, but it doesn't work across instances (Cloud to Enterprise, Enterprise to Enterprise). It also doesn't produce a verification report you can hand to an auditor.
+
+vcopy exists to close that gap. It copies repositories between any combination of GitHub Cloud and Enterprise instances, then runs five complementary integrity checks that each target a different failure mode. It also handles the things `git push --mirror` can't: releases, issues, wiki, path exclusion, and batch operations across hundreds of repos.
+
+If you've ever written a shell script to copy repos between orgs and then manually spot-checked the result, vcopy replaces that entire workflow with verified, auditable, resumable copies.
 
 ---
 
 ## Quick Start
 
-**Prerequisites:** `git` in PATH and a token with `repo` scope on both source and target. Optionally, the [`gh` CLI](https://cli.github.com/) for automatic token detection. Go 1.21+ to build from source.
+**Prerequisites:** `git` in PATH and a token with `repo` scope on both source and target. Optionally, the [`gh` CLI](https://cli.github.com/) for automatic token detection. Go 1.25+ to build from source.
 
 ### Install
 
@@ -129,7 +170,19 @@ Provide tokens via flags or interactive prompt:
 vcopy myorg/myrepo target-org --auth-method pat --source-token ghp_xxx --target-token ghp_yyy
 ```
 
-Required token scopes: `repo` (full control of private repositories).
+Required token scopes: `repo` (full control of private repositories). Fine-grained personal access tokens and GitHub App installation tokens also work as long as they have equivalent repository read/write permissions. vcopy treats tokens as opaque Bearer tokens in API calls.
+
+### Network Requirements
+
+vcopy requires network access to both the source and target GitHub instances from the machine where it runs. For environments where simultaneous connectivity isn't possible (controlled boundaries, classified networks), use a split workflow:
+
+```bash
+# From a machine with access to the source: copy without verification
+vcopy myorg/myrepo target-org --skip-verify
+
+# Later, from a machine with access to both (or after network path changes):
+vcopy myorg/myrepo target-org --verify-only
+```
 
 ## Usage
 
@@ -285,17 +338,17 @@ The `--public-source` flag controls whether source auth is *required* — you ca
 
 ## Integrity Verification
 
-After copying, vcopy runs **5 independent checks** to cryptographically prove nothing was lost or altered in transit:
+After copying, vcopy runs **5 complementary integrity checks** to verify nothing was lost or altered in transit. Each check targets a different failure mode, so problems that slip past one layer get caught by another:
 
-| # | Check | What it proves |
+| # | Check | What it verifies |
 |---|-------|---------------|
 | 1 | **Ref Comparison** | Every branch and tag points to the same commit SHA |
 | 2 | **Object Hashes** | Every commit, file, and directory has identical content (SHA-based) |
 | 3 | **Tree Hashes** | Each branch's directory structure and file contents match byte-for-byte |
-| 4 | **Commit Signatures** | GPG/SSH signatures on commits survived the transfer |
-| 5 | **Bundle Integrity** | Both repos produce structurally valid, equivalent git bundles |
+| 4 | **Commit Signatures** | GPG/SSH signatures on commits survived the transfer (reported as WARN if lost, since some transfer methods strip signatures) |
+| 5 | **Bundle Integrity** | Both repos produce structurally valid git bundles containing the same refs |
 
-**All 5 pass → cryptographic proof the copy is identical.** If any check reports WARN, all source content was verified but the target contains additional content or excluded refs. If any check reports FAIL, the report tells you exactly what differs.
+**All 5 pass → strong cryptographic verification that the copy matches the source.** If any check reports WARN, all source content was verified but the target contains additional content or excluded refs. If any check reports FAIL, the report tells you exactly what differs.
 
 > In `--code-only` mode, checks 1 and 5 are skipped (they depend on tags). The remaining 3 checks still verify branch integrity.
 
@@ -437,6 +490,18 @@ This check produces **WARN** (not FAIL) when signatures are lost — this is exp
 
 ## Security
 
+### Threat Model
+
+vcopy is designed to ensure that repository content arriving in a target organization is identical to what exists in the source. The primary threats it addresses:
+
+- **Silent data loss during transfer** — branches, tags, objects, or signatures dropped without detection. vcopy's 5 verification checks catch this.
+- **Credential leakage** — tokens accidentally exposed in logs, git output, or error messages. vcopy sanitizes all output.
+- **Malicious content in downloaded artifacts** — release assets fetched from attacker-controlled URLs. vcopy validates URL schemes and blocks internal network addresses.
+
+What is explicitly **out of scope**: vcopy does not protect against a compromised GitHub instance serving altered content through the API. If the source GitHub instance is itself compromised, vcopy will faithfully copy and verify the compromised content. vcopy also does not verify that the *original author's intent* matches the repository content — it verifies source-to-target equivalence, not provenance.
+
+### Mitigations
+
 - **Token input is hidden**: When entering PATs interactively, terminal echo is disabled so tokens are never visible on screen.
 - **Git output is sanitized**: All git command output (stdout/stderr) is filtered to replace tokens with `[REDACTED]` before display, preventing credential leakage in verbose mode or error messages.
 - **Tokens are never logged**: Tokens embedded in git clone URLs are stripped from any output shown to the user.
@@ -524,6 +589,7 @@ Source Repo            Mirror + Verify              Target Repo (final)
 ### What this means for you
 
 - **Full git history is preserved** — every original commit, branch, and tag from the source exists in the target. The cleanup only affects the latest working tree on the default branch
+- **Cleanup only runs on the default branch** — excluded paths are removed via a shallow clone of the default branch only. If excluded files (workflows, Copilot config, etc.) exist on feature branches, they remain there. If your security requirements demand removal from all branches, use a separate tool like `git filter-repo` after the copy
 - **Verification passes** — the 5-layer check runs against the exact mirror before any paths are removed, so it compares source-to-target 1:1
 - **The cleanup is transparent** — anyone looking at the target repo can see exactly what was removed by inspecting the `vcopy: remove excluded paths` commit
 - **Excluded paths exist in history** — the files are removed from the current tree, but they still exist in older commits. If you need them scrubbed from history entirely, you'd need a separate tool like `git filter-repo`
@@ -834,7 +900,7 @@ This handles transient network failures and GitHub API rate limits gracefully.
 
 ## GitHub Action
 
-vcopy is available as a [reusable GitHub Action](https://github.com/marketplace) with all CLI capabilities. Use it directly in your workflows:
+vcopy is available as a reusable GitHub Action with all CLI capabilities. Use it directly in your workflows:
 
 ### Quick Start
 
@@ -895,6 +961,13 @@ This is expected for any unsigned executable downloaded from the internet. Smart
 ## Contributing
 
 Contributions are welcome! Please open an issue or pull request on [GitHub](https://github.com/jpmicrosoft/vcopy).
+
+Before submitting a pull request:
+
+1. **Run the test suite**: `go test ./...` — all tests must pass
+2. **Run the linter**: `golangci-lint run` if you have it installed
+3. **Test cross-platform**: vcopy builds for 6 platform targets. If your change touches file paths, temp directories, or OS-specific behavior, verify on both Windows and Linux/macOS if possible
+4. **Security-sensitive changes**: Changes to authentication, token handling, verification logic, or URL processing receive extra scrutiny. Please describe the security implications in your PR description
 
 ## Author
 
